@@ -1,0 +1,13 @@
+name: dalec
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - pyyaml
+  - pip
+  - pip:
+      - -e .
