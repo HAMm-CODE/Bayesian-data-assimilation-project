@@ -1,0 +1,28 @@
+#Data: fluxnet policy forbids redistribution
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+data/processed/.gitkeep
+
+#large outputs (posterior live on Roihu)
+*.nc
+*.npz
+
+#Cluster logs
+jobs/logs/
+*.out
+*.err
+
+#Python
+__pycache__/
+*.py[cod]
+*egg-info/
+.env/
+.pytest.cache/
+.ruff_cache/
+
+#Editors / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
