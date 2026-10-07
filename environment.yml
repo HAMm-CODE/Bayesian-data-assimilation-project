@@ -1,6 +1,7 @@
 name: dalec
 channels:
   - conda-forge
+  - nodefaults
 dependencies:
   - python=3.13
   - numpy
@@ -9,5 +10,3 @@ dependencies:
   - matplotlib
   - pyyaml
   - pip
-  - pip:
-      - -e .

@@ -7,6 +7,7 @@ years:
   evaluation: [2011, 2014]
 
 columns:
+  timestamp: TIMESTAMP
   nee: NEE_VUT_REF
   sigma: NEE_VUT_REF_RANDUNC
   qc: NEE_VUT_REF_QC
