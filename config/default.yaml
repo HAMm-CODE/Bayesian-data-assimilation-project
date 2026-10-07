@@ -16,7 +16,7 @@ data:
   missing_value: -9999
   qc_threshold: 0.75      # inherited; re-assess and justify in DECISIONS.md
 
-seasons:                  # meteorological seasons; see DECISIONS.md
+seasons:                  # meteorological seasons
   DJF: [12, 1, 2]
   MAM: [3, 4, 5]
   JJA: [6, 7, 8]
