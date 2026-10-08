@@ -84,15 +84,13 @@ Last updated: 2026-10-08.
   | 0.9 | 4,101 | 80.2% |
   | 1.0 | 3,448 | 67.4% |
 
-  The count is flat below 0.75 and drops steeply toward 1.0, so the choice of 0.75 changes the amount of data little. Still to check: whether the extra or lost days fall mainly in particular months (QC figure).
+  The count is flat below 0.75 and drops steeply toward 1.0, so the choice of 0.75 changes the amount of data little. (Computed with `add_masks` at each threshold; no figure, by the author's choice.)
 
-### D6. Seasons (Decided, 2026-10-08)
+### D6. Seasons (Decided, 2026-10-08; currently not used)
 
-- Meteorological seasons: DJF (December to February), MAM (March to May), JJA (June to August), SON (September to November).
-- Used **only in figures** (colouring, and grouping likelihood weight shares). The model and the likelihood never use them, so the choice changes how results are described, not the results.
-- Reason: the standard definition, simple, and comparable with other studies.
-- Stated limitation: at Hyytiala (62 N) winter conditions last longer than December to February, so some winter-like days in November and March fall under SON and MAM. Winter's share of the likelihood weight is therefore, if anything, understated.
-- Alternatives considered and not chosen: thermal seasons (winter = daily mean below 0 C), which match conditions better but change every year; fixed site-specific months, which need their own justification; monthly weight shares, which avoid any grouping but give a busier figure.
+- Chosen definition: meteorological seasons, DJF (December to February), MAM (March to May), JJA (June to August), SON (September to November).
+- No current figure groups by season: the monthly box plots (Figure C) and the annual cycle (Figure E) show the seasonal pattern month by month and day by day instead. The `seasons` block was therefore removed from the config, because a setting nothing reads is misleading. Restore it if a later figure needs seasons.
+- Stated limitation if used later: at Hyytiala (62 N) winter lasts longer than December to February.
 
 ### D9. Missing values and file checks (Decided)
 
@@ -133,14 +131,17 @@ Last updated: 2026-10-08.
 
 ### D15. Sigma figures (Decided, 2026-10-08)
 
-- One script, `scripts/01_sigma_eda.py`, makes all four figures, because they share the same loaded data. Each figure is saved as its own file (PDF for the thesis, PNG for quick viewing), so each can be placed separately.
+- One script, `scripts/01_sigma_eda.py`, makes all five figures, because they share the same loaded data. Each figure is saved as its own file (PDF for the thesis, PNG for quick viewing).
+- The five figures:
+  - **A. Sigma over time:** RANDUNC for every day, with excluded days in grey and missing-RANDUNC periods shaded. Also prints every gap of 7 days or more.
+  - **B. Sigma against |NEE|:** one colour, with a straight trend line. No fit statistics are shown, by the author's choice, to keep the figure easy to explain.
+  - **C. Sigma by calendar month:** one box plot per month, all years pooled.
+  - **D. Distribution of sigma:** histogram with a smoothed density curve, drawn only between the smallest and largest observed value (smoothing would otherwise suggest values below the minimum), and the median marked.
+  - **E. Annual cycle of sigma:** median and middle half (25th to 75th percentile) for each day of the year. Median rather than mean, because RANDUNC is skewed. 29 February is dropped, so every year has a 365-day axis.
 - Which days each figure uses (previously OPEN-2):
-  - Figure A (sigma over time) and Figure D (QC sensitivity) use **every day** of the calibration block, because they are about what gets excluded.
-  - Figure B (sigma against |NEE|) and Figure C (weight share) use **assimilable days only**, because those are what the likelihood sees.
-  - Consequence: the R^2 in Figure B will differ from the previous analysis (about 0.47), which used all days from 1996 to 2014 at any QC.
-- Weight of a day in the Gaussian likelihood = 1 / sigma^2.
-- QC thresholds compared in Figure D are set in the config (`eda.qc_sensitivity`). Figure D re-masks the same loaded data at each threshold; the config file is never changed.
-- Colours: four season colours checked for colour-blind safety across all pairs, each paired with a distinct marker shape, so no figure relies on colour alone.
+  - Figure A uses **every day** of the calibration block, because it shows what is excluded and missing.
+  - Figures B to E use **assimilable days only**, because those are what the likelihood sees.
+- Removed by the author's choice: the season weight-share figure and the QC sensitivity figure. The QC sensitivity numbers remain recorded in D5.
 
 ---
 
@@ -164,14 +165,14 @@ Reasons:
 Known consequences, stated as limitations:
 
 - RANDUNC covers measurement random error only (computed from measured half-hours). It does not include model error, such as the known early spring onset.
-- Days with very small RANDUNC (mostly winter) carry a large share of the likelihood weight (to be shown in Figure C), and the posterior may be narrower than the true uncertainty.
+- Days with very small RANDUNC (mostly winter) carry a large share of the likelihood weight (weight = 1/sigma^2; the low winter values are visible in Figures C and E), and the posterior may be narrower than the true uncertainty.
 - Recent model-data fusion studies mostly use a constant sigma or one derived from model-data mismatch (Famiglietti et al. 2021; Bacour et al. 2023; Douglas et al. 2026 preprint) rather than per-day RANDUNC. Defend the choice with the reasons above and the sensitivity analysis below, not with precedent.
 
 **Sensitivity analysis (planned, later):**
 
 - Option C: sigma_t = sqrt( RANDUNC_t^2 + sigma_m^2 ), with sigma_m ~ HalfNormal(1) estimated jointly. Adds one shared model-error term.
 - Support for option C if needed: Gelman et al. (2020, Section 10.5), golf putting example (known per-point variance plus an added independent error term "to allow for model misspecification"); Fer et al. (2018), observation-error parameters estimated during calibration.
-- Compare A and C on: posterior widths, winter weight share, R-hat, divergences and number of posterior modes.
+- Compare the two on: posterior widths, winter share of the likelihood weight, R-hat, divergences and number of posterior modes.
 
 Not chosen:
 
