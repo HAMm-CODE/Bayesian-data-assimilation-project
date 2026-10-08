@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+
 from dalec.config import load_config, resolve_path, year_block
 
 # Names of the True/False columns added by add_masks().
@@ -20,6 +21,7 @@ MASK_NEE = "nee_valid"      # NEE is present
 MASK_QC = "qc_pass"         # QC fraction >= threshold
 MASK_SIGMA = "sigma_valid"  # RANDUNC is present and > 0
 MASK_USE = "assimilable"    # all three: the day enters the likelihood
+
 
 def load_fluxnet_dd(
     path: str | Path,
@@ -62,6 +64,7 @@ def load_fluxnet_dd(
     _check_daily_contiguous(data.index)
     return data
 
+
 def _check_daily_contiguous(index: pd.DatetimeIndex) -> None:
     """Stop if any date is duplicated or missing from the calendar.
 
@@ -79,6 +82,7 @@ def _check_daily_contiguous(index: pd.DatetimeIndex) -> None:
         shown = ", ".join(str(d) for d in absent.date)
         raise ValueError(f"dates missing from the calendar, e.g. {shown}")
 
+
 def select_years(data: pd.DataFrame, start: int, end: int) -> pd.DataFrame:
     """Keep the inclusive year range [start, end], which must be fully covered."""
     years = data.index.year
@@ -93,6 +97,7 @@ def select_years(data: pd.DataFrame, start: int, end: int) -> pd.DataFrame:
             f"{first.date()} to {last.date()} of that range"
         )
     return selected
+
 
 def add_masks(
     data: pd.DataFrame,
@@ -121,6 +126,7 @@ def add_masks(
     out[MASK_USE] = out[MASK_NEE] & out[MASK_QC] & out[MASK_SIGMA]
     return out
 
+
 def screening_report(data: pd.DataFrame) -> pd.DataFrame:
     """Sort every day into exactly one row: assimilable, or why it was excluded.
 
@@ -145,6 +151,7 @@ def screening_report(data: pd.DataFrame) -> pd.DataFrame:
     if report.loc["assimilable", "days"] != int(data[MASK_USE].sum()):
         raise AssertionError("report disagrees with the assimilable mask")
     return report
+
 
 def load_screened_block(
     config: dict[str, Any] | None = None, *, block: str = "calibration"

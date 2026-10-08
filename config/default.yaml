@@ -14,10 +14,15 @@ columns:
 
 data:
   missing_value: -9999
-  qc_threshold: 0.75      # inherited; re-assess and justify in DECISIONS.md
+  qc_threshold: 0.75      # see DECISIONS.md D5: within 0.5-0.8 used in literature
 
-seasons:                  # meteorological seasons
+seasons:                  # figures only (colours, weight shares); never used by the model
   DJF: [12, 1, 2]
   MAM: [3, 4, 5]
   JJA: [6, 7, 8]
   SON: [9, 10, 11]
+
+eda:
+  qc_sensitivity: [0.5, 0.75, 0.9, 1.0]   # thresholds compared in Figure D
+  figure_formats: [pdf, png]              # pdf for the thesis, png for quick viewing
+  figure_dpi: 300

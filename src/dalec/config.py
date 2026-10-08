@@ -13,6 +13,7 @@ import yaml
 REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH: Path = REPO_ROOT / "config" / "default.yaml"
 
+
 def load_config(path: str | Path | None = None) -> dict[str, Any]:
     """Load the YAML config. Defaults to config/default.yaml."""
     config_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
@@ -24,10 +25,12 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
         raise ValueError(f"config did not parse to a mapping: {config_path}")
     return config
 
+
 def resolve_path(value: str | Path) -> Path:
     """Turn a config path into an absolute path (relative = from repo root)."""
     path = Path(value)
     return path if path.is_absolute() else REPO_ROOT / path
+
 
 def year_block(config: dict[str, Any], key: str) -> tuple[int, int]:
     """Return an inclusive (start, end) year pair from config['years'][key]."""
