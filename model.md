@@ -265,34 +265,34 @@ starting pool sizes.
 
 "B&W range" is the published prior range (a flat, "uniform" prior between the
 two numbers). "Previous repository" says how the old code treated it.
-**Scale** and **Prior** are filled in steps 2 and 3.
+**Scale** (step 2, D32) and **Prior** (step 3, D33 to D39) are now filled. All priors are smooth; `theta_min` is computed from the share `h` (D35).
 
 | # | Code name | Symbol | Meaning | Unit | B&W range | Previous repository | Scale | Prior |
 |---|---|---|---|---|---|---|---|---|
-| 1 | `f_auto` | f_auto | share of GPP breathed out by the trees | - | 0.3 to 0.7 | uniform, B&W range | | |
-| 2 | `f_lab` | f_lab | share of GPP to labile | - | 0.01 to 0.5 | Dirichlet split of `1 - f_auto`, weights from site data | | |
-| 3 | `f_fol` | f_fol | share of GPP to foliage | - | 0.01 to 0.5 | (Dirichlet, as above) | | |
-| 4 | `f_roo` | f_roo | share of GPP to fine roots | - | 0.01 to 0.5 | (Dirichlet, as above) | | |
-| - | `f_woo` | f_woo | share of GPP to wood | - | derived | (Dirichlet, as above) | derived | derived |
-| 5 | `theta_roo` | theta_roo | fine-root turnover | d-1 | 1e-4 to 1e-2 | B&W range | | |
-| 6 | `theta_woo` | theta_woo | wood turnover | d-1 | 2.5e-5 to 1e-3 | B&W range | | |
-| 7 | `theta_lit` | theta_lit | litter respiration rate at 0 degC | d-1 | 1e-4 to 1e-2 | from a 1 to 5 year residence time | | |
-| 8 | `theta_som` | theta_som | soil respiration rate at 0 degC | d-1 | 1e-7 to 1e-3 | from a 24 to 61 year residence time (site soil carbon) | | |
-| 9 | `theta_min` | theta_min | litter-to-soil transfer at 0 degC | d-1 | 1e-5 to 1e-2 | B&W range | | |
-| 10 | `temperature_exponent` | Theta | how fast decomposition rises with temperature | degC-1 | 0.018 to 0.08 | B&W range | | |
-| 11 | `d_onset` | d_onset | day of leaf onset | day of year | 1 to 365 | uniform, B&W range (set by hand in one early run) | | |
-| 12 | `cr_onset` | cr_onset | length of the leaf-onset pulse | days | 10 to 100 | uniform, B&W range | | |
-| 13 | `d_fall` | d_fall | day of leaf fall | day of year | 1 to 365 | uniform, B&W range, but had no effect (printed A8); active now (D25) | | |
-| 14 | `cr_fall` | cr_fall | length of the leaf-fall pulse | days | 20 to 150 | uniform, B&W range | | |
-| 15 | `c_lf` | c_lf | share of needles shed per year | - | 1/8 to 1 | 0.20 to 0.33 (needles live 3 to 5 years) | | |
-| 16 | `lma` | c_lma | leaf carbon per leaf area | g C m-2 | 10 to 400 | 116 to 247, from site litterfall and LAI | | |
-| 17 | `ceff` | c_eff | canopy efficiency | - | 10 to 100 | 5 to 20 (REFLEX, Fox et al. 2009) | | |
-| 18 | `c_lab_0` | C_lab(0) | starting labile pool | g C m-2 | 20 to 2000 | derived from site litterfall | | |
-| 19 | `c_fol_0` | C_fol(0) | starting foliage pool | g C m-2 | 20 to 2000 | derived: litterfall / `c_lf` | | |
-| 20 | `c_roo_0` | C_roo(0) | starting fine-root pool | g C m-2 | 20 to 2000 | derived from root litter and `theta_roo` | | |
-| 21 | `c_woo_0` | C_woo(0) | starting wood pool | g C m-2 | 100 to 1e5 | derived: tree carbon minus the other plant pools | | |
-| 22 | `c_lit_0` | C_lit(0) | starting litter pool | g C m-2 | 20 to 2000 | derived: two new parameters were sampled instead, total soil respiration at 0 degC (`rh_ref`) and the soil's share of it (`f_som`) | | |
-| 23 | `c_som_0` | C_som(0) | starting soil pool | g C m-2 | 100 to 2e5 | derived (as above) | | |
+| 1 | `f_auto` | f_auto | share of GPP breathed out by the trees | - | 0.3 to 0.7 | uniform, B&W range | interval | Beta(25.5, 24.5), D34 |
+| 2 | `f_lab` | f_lab | share of GPP to labile | - | 0.01 to 0.5 | Dirichlet split of `1 - f_auto`, weights from site data | simplex | (1 - f_auto) x Dirichlet, alpha 13.06, D34 |
+| 3 | `f_fol` | f_fol | share of GPP to foliage | - | 0.01 to 0.5 | (Dirichlet, as above) | simplex | (Dirichlet) alpha 13.06, D34 |
+| 4 | `f_roo` | f_roo | share of GPP to fine roots | - | 0.01 to 0.5 | (Dirichlet, as above) | simplex | (Dirichlet) alpha 15.26, D34 |
+| - | `f_woo` | f_woo | share of GPP to wood | - | derived | (Dirichlet, as above) | simplex | (Dirichlet) alpha 44.27, D34 |
+| 5 | `theta_roo` | theta_roo | fine-root turnover | d-1 | 1e-4 to 1e-2 | B&W range | log | LogNormal, median 1.78e-3, sdlog 0.45, D35 |
+| 6 | `theta_woo` | theta_woo | wood turnover | d-1 | 2.5e-5 to 1e-3 | B&W range | log | LogNormal, median 5.33e-5, sdlog 0.39, D35 |
+| 7 | `theta_lit` | theta_lit | litter respiration rate at 0 degC | d-1 | 1e-4 to 1e-2 | from a 1 to 5 year residence time | log | LogNormal, median 1.22e-3, sdlog 0.41, D35 |
+| 8 | `theta_som` | theta_som | soil respiration rate at 0 degC | d-1 | 1e-7 to 1e-3 | from a 24 to 61 year residence time (site soil carbon) | log | LogNormal, median 7.15e-5, sdlog 0.24, D35 |
+| 9 | `theta_min` | theta_min | litter-to-soil transfer at 0 degC | d-1 | 1e-5 to 1e-2 | B&W range | via h (interval) | derived: theta_lit h/(1-h), h ~ Beta(4, 16), D35 |
+| 10 | `temperature_exponent` | Theta | how fast decomposition rises with temperature | degC-1 | 0.018 to 0.08 | B&W range | log | LogNormal, median 0.0336, sdlog 0.35, D36 |
+| 11 | `d_onset` | d_onset | day of leaf onset | day of year | 1 to 365 | uniform, B&W range (set by hand in one early run) | plain | Normal(145, 15), D37 |
+| 12 | `cr_onset` | cr_onset | length of the leaf-onset pulse | days | 10 to 100 | uniform, B&W range | log | LogNormal, median 40, sdlog 0.35, D37 |
+| 13 | `d_fall` | d_fall | day of leaf fall | day of year | 1 to 365 | uniform, B&W range, but had no effect (printed A8); active now (D25) | plain | Normal(265, 15), D37 |
+| 14 | `cr_fall` | cr_fall | length of the leaf-fall pulse | days | 20 to 150 | uniform, B&W range | log | LogNormal, median 60, sdlog 0.35, D37 |
+| 15 | `c_lf` | c_lf | share of needles shed per year | - | 1/8 to 1 | 0.20 to 0.33 (needles live 3 to 5 years) | interval | Beta(14.51, 39.24), D37 |
+| 16 | `lma` | c_lma | leaf carbon per leaf area | g C m-2 | 10 to 400 | 116 to 247, from site litterfall and LAI | log | LogNormal, median 185, sdlog 0.25, D38 |
+| 17 | `ceff` | c_eff | canopy efficiency | - | 10 to 100 | 5 to 20 (REFLEX, Fox et al. 2009) | log | LogNormal, median 16.5, sdlog 0.41, D38 |
+| 18 | `c_lab_0` | C_lab(0) | starting labile pool | g C m-2 | 20 to 2000 | derived from site litterfall | log | LogNormal, median 77, sdlog 0.50, D39 |
+| 19 | `c_fol_0` | C_fol(0) | starting foliage pool | g C m-2 | 20 to 2000 | derived: litterfall / `c_lf` | log | LogNormal, median 590, sdlog 0.30, D39 |
+| 20 | `c_roo_0` | C_roo(0) | starting fine-root pool | g C m-2 | 20 to 2000 | derived from root litter and `theta_roo` | log | LogNormal, median 238, sdlog 0.30, D39 |
+| 21 | `c_woo_0` | C_woo(0) | starting wood pool | g C m-2 | 100 to 1e5 | derived: tree carbon minus the other plant pools | log | LogNormal, median 5900, sdlog 0.25, D39 |
+| 22 | `c_lit_0` | C_lit(0) | starting litter pool | g C m-2 | 20 to 2000 | derived: two new parameters were sampled instead, total soil respiration at 0 degC (`rh_ref`) and the soil's share of it (`f_som`) | log | LogNormal, median 450, sdlog 0.50, D39 |
+| 23 | `c_som_0` | C_som(0) | starting soil pool | g C m-2 | 100 to 2e5 | derived (as above) | log | LogNormal, median 6100, sdlog 0.25, D39 |
 
 **Why the previous repository moved away from the published ranges.** With the
 published ranges, 837 of 1,000 draws from the prior produced physically
@@ -309,12 +309,20 @@ NPP, `f_roo` 0.01 to 1 of what remains; leaf lifespan 1.001 to 8 years; `ceff`
 365.25 to 1461 on the continuous counter; starting pools from 1 g C m-2. Useful
 in step 3.
 
-**Candidate scales (to decide in step 2).** Only a starting point:
-- rates (`theta_...`) and pool sizes: log scale, because their ranges span 2 to
-  4 powers of ten;
-- allocation fractions: a simplex (a set of shares that always adds up to 1),
-  which also fixes correction 1;
-- days and periods: plain scale within their bounds.
+**Scales (step 2, decided 2026-10-13, D32).** The paper gives each parameter a
+*range*; the *scale* is how the sampler moves inside that range. It is read off
+the range with one rule:
+
+- **log**: the range covers a factor of 10 or more (upper / lower >= 10). The
+  sampler works on `log(value)`, so 0.0001 and 0.01 are as easy to move between
+  as 1 and 100.
+- **interval**: the range covers less than a factor of 10, or the parameter is a
+  position (a day of the year). The sampler works on an unbounded stretched
+  version of the range (the "logit"), so it can never step outside it.
+- **simplex**: the allocation split (D28), whose shares always add up to 1.
+
+The rule is applied again to the final step-3 ranges: if a range is narrowed
+below a factor of 10 (for example `lma`), its scale may change to interval.
 
 ## 7. Fixed ACM coefficients (D22)
 

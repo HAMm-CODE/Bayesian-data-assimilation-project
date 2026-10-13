@@ -36,6 +36,14 @@ drivers:
     half_hours_per_day: 48          # a full day; days with fewer valid half-hours get NaN
     mean_tolerance: 0.05            # degC; half-hourly mean must match the daily TA_F this closely
 
+site:
+  latitude_deg: 61.8474        # FI-Hyy; sets day length in ACM (MODEL.md 3.4)
+
+model:
+  frost_cutoff:                # not part of DALEC2; off in the main model (D24)
+    enabled: false
+    threshold_degc: -2.0       # no GPP when (Tmax + Tmin) / 2 is below this
+
 eda:
   figure_formats: [pdf, png]   # pdf for the thesis, png for quick viewing
   figure_dpi: 300

@@ -263,6 +263,101 @@ The leaf onset and leaf fall pulses use `t`, the number of days since the start 
 ### D31. Leaf-fall offset `psi` from the official code's polynomial (A9)
 `psi` is computed with the sixth-order polynomial in `log(L - 1)`, `L = 1 / c_lf`, from `DALEC_ALL/offset.c`. **How it was settled:** the polynomial matches the equation `2 sqrt(pi) psi = log(1 - c_lf) exp(-psi^2)` within 0.004 for leaf lifespans 1.001 to 8 years; it does not match the previous repository's form (`log(1 - c_lf)` on the other side), which gave an offset about 8 times too large at `c_lf = 0.25` (about 24 days too early or late for a 60-day fall period). The A7 constants 0.6245 and 6.9088 come out of the same polynomial at `L = 1.001`, which confirms the reading. **Why the polynomial, not an exact root:** `c_lf` is now sampled (D26), so `psi` must change smoothly with it for NUTS gradients; the polynomial is differentiable, the root solve is not without extra work, and it is what DALEC2's authors run. Limit: valid for `L` in 1.001 to 8 years only, which covers Scots pine needles (3 to 5 years). **Still to check:** the printed A9 in the PDF, to tell a paper typo from a copying error.
 
+### D32. Parameter scales (Gelman et al. 2020, Section 2.3)
+Each parameter's sampling scale follows from its range by one rule: **log** if upper / lower >= 10, **interval** (logit) if less or if the parameter is a day-of-year position, **simplex** for the allocation split. Result: all five turnover rates, `cr_onset`, `lma`, `ceff` and all six starting pools on the log scale; `f_auto`, the temperature exponent, `d_onset`, `d_fall`, `cr_fall` and `c_lf` on the interval scale; the four allocation shares on the simplex. **Why:** NUTS moves best when every parameter is unbounded and changes on a similar scale; the published ranges span from a factor of 4 to a factor of 10,000. The papers give ranges, not scales, so the scale is a modelling choice; using one rule keeps it simple and explainable. Re-applied to the final ranges after step 3. In PyMC most of this is automatic: a log-normal prior is sampled on the log scale, a bounded prior on the interval scale.
+
+### D33. Prior strategy: smooth, weakly informative priors (Gelman et al. 2020, Section 2; step 3)
+Every prior is a smooth distribution on the parameter's scale (D32), centred on a site measurement or literature value and wide enough that the published range stays possible but its extremes are unlikely. No flat priors with hard edges. **Why:** hard edges are walls for NUTS; the previous repository's unusable run had eight parameters pinned at their prior bounds. Smooth priors also state the belief honestly: values near the measurement are likely, extremes possible but rare. **Options not taken:** flat priors on narrowed ranges (the previous repository's approach), and a mix of flat and smooth. **Cost:** each prior needs a stated centre and width with a source; recorded parameter by parameter below.
+
+### D34. Priors, group 1: allocation
+- `f_auto ~ Beta(25.5, 24.5)`: centre 0.51, sd 0.07, 95% 0.37 to 0.65; under 0.4% outside the published 0.3 to 0.7. **Source:** Hyytiala tree growth 505 of GPP about 1,030 g C m-2 yr-1 (Ilvesniemi et al. 2009, Fig. 6) gives 0.51, site range 0.37 to 0.60; Waring et al. (1998) NPP/GPP 0.47 +/- 0.04 (f_auto 0.53); DeLucia et al. (2007) NPP/GPP 0.23 to 0.83 across forests, lowest in boreal forests (f_auto above 0.5).
+- `(f_lab, f_fol, f_roo, f_woo) = (1 - f_auto) x Dirichlet(13.06, 13.06, 15.26, 44.27)`: shares of growth 0.152, 0.152, 0.178, 0.517 from the measured needle litterfall 154 (split equally between labile and foliage), below-ground litter 90 and wood growth 261 g C m-2 yr-1 (Ilvesniemi et al. 2009, Fig. 6); total concentration 85.65 derived from the measured spread of litterfall and GPP (previous repository, section 11). As shares of GPP: medians 0.073, 0.073, 0.085, 0.251.
+- **Why this informative:** the previous repository's flat split sent too much carbon to the needles and LAI ran away to 48 (site value about 3); Gelman et al. (2020, Section 7.3): "as the model becomes more complex, all of the priors need to become tighter".
+- **Caveats:** the equal labile/foliage split is a judgement (the data constrain only their sum); tower GPP includes the understory but the growth flows are trees only.
+- **Planned check (Gelman et al. 2020, Section 6.3):** after fitting, compare prior and posterior spread; if the posterior of `f_auto` is about as wide as its prior, refit once with sd 0.10 as a sensitivity run.
+
+### D35. Priors, group 2: turnover rates
+All log-normal (log scale, D32). Medians and 95% ranges given as residence times (1 / rate); `theta_lit` and `theta_som` are rates at 0 C.
+
+| Parameter | Median | 95% (residence) | Source |
+|---|---|---|---|
+| `theta_roo` | 1.78e-3 d-1 (1.5 yr) | 0.6 to 3.7 yr, sdlog 0.45 | Hyytiala root litter 90 / root carbon 238 g C m-2 = 2.6 yr (Ilvesniemi et al. 2009); European conifers about 0.9 to 1.1 yr-1 (Brunner et al. 2013) |
+| `theta_woo` | 5.33e-5 d-1 (51 yr) | 24 to 110 yr, sdlog 0.39 | fast end: site steady-state value (wood 6,300 / growth 261 g C m-2 yr-1), an upper limit on the rate because the stand is still growing; slow end: published lower limit of the rate |
+| `theta_lit` | 1.22e-3 d-1 (2.2 yr) | 1 to 5 yr, sdlog 0.41 | Yasso07 litter decomposition rates (Tuomi et al. 2009), as worked out by the previous repository |
+| `theta_som` | 7.15e-5 d-1 (38 yr) | 24 to 61 yr, sdlog 0.24 | Hyytiala soil carbon 6,560 g C m-2 and decomposition flux 290 to 370 g C m-2 yr-1 (Ilvesniemi et al. 2009), derivation from the previous repository |
+
+**`theta_min` is not given its own prior. It is computed from the share of decomposing litter that becomes soil carbon**, `h = theta_min / (theta_lit + theta_min)`, so `theta_min = theta_lit h / (1 - h)`, with `h ~ Beta(4, 16)` (mean 0.20, 95% 0.06 to 0.40). **Source:** RothC sends 1/(x+1) of decomposed material to soil pools, with `x = 1.67 (1.85 + 1.60 exp(-0.0786 clay%))`: 17% at 5% clay, 19% at 10%, 22% at 23% (Coleman et al. 2024, RothC model description). Hyytiala's soil is a low-clay podzol, so about 0.2. Implied `theta_min`: median 2.8e-4 d-1, 95% 6.3e-5 to 1.1e-3, inside the published range on more than 99.99% of draws. **Why (Gelman et al. 2020):** the first proposal used the whole published range (a factor of 1,000) because no direct source was found, which conflicts with "as the model becomes more complex, all of the priors need to become tighter" (Section 7.3); rewriting the parameter as an interpretable quantity (Section 2.3) lets real subject-matter knowledge set the prior (Sections 5.9, 7.3). The model is unchanged; only the way its prior is written.
+
+**Fallback rule for any parameter with no site or literature source:** centre on the geometric middle of the published range and let the published range be the 95% interval. Used only if no better source is found.
+
+**Way forward for groups 1 and 2 (Gelman et al. 2020):**
+1. **Judge the priors together, not one by one** (Sections 2.4, 7.3: independent priors "may jointly be strongly informative"). The prior predictive check (`scripts/03_prior_predictive.py`) will run DALEC2 with draws from all priors at once. Its pass criteria are written down **before** it is run (annual GPP, ecosystem and soil respiration, NEE, peak LAI, and pool sizes after 14 years), so the check cannot be tuned after seeing it.
+2. **Watch the soil carbon used twice:** in `theta_som` here and in the starting soil pool (D27). The check above shows whether the implied soil respiration is sensible; if not, the previous repository's reparameterisation (D27 fallback) is used.
+3. **After fitting, measure how much each prior mattered** (Section 6.3): compare prior and posterior spread for every parameter. Parameters whose posterior is about as wide as their prior were not informed by NEE; this is a direct result for RQ1 (expected for the slow `theta_woo` and `theta_som`). Only those get a sensitivity refit with a wider prior.
+
+### D36. Priors, group 3: temperature exponent (confirmed 2026-10-13)
+`Theta ~ LogNormal(median 0.0336, sdlog 0.35)`: 95% 0.017 to 0.067, i.e. Q10 = exp(10 Theta) of 1.18 to 1.95 (median Q10 1.40). 3.7% below and 0.7% above the published 0.018 to 0.08. **Source:** Mahecha et al. (2010): ecosystem respiration across 60 FLUXNET sites converges to Q10 = 1.4 +/- 0.1 against air temperature once seasonal confounding is removed; the previous repository's estimate from Hyytiala winter fluxes was Theta = 0.0366 (Q10 1.44), close to the median. **Why wider than Mahecha's +/- 0.1:** DALEC2's single exponent also absorbs effects the model lacks (soil frost, moisture), so a site-level value may differ from the global one. **Scale changed from interval to log** (D32 allows this after step 3): the prior is now positive-only and smooth without needing the published bounds, which it already respects on 96% of draws.
+
+### D37. Priors, group 4: leaf timing (phenology)
+In DALEC2 terms at an evergreen pine site, the onset pulse is the **spring flush of new shoots and needles** and the fall pulse is the **autumn drop of the oldest needles**. Note: this is **not** the NEE spring onset of Figure G (median day 100), which is the recovery of photosynthesis in needles that already exist; DALEC2 cannot represent that recovery (F9), and its leaf onset should not be tuned to it.
+
+| Parameter | Prior | 95% | Basis |
+|---|---|---|---|
+| `d_onset` | Normal(145, 15) | day 116 to 174 | Scots pine shoot elongation in southern Finland starts in about mid to late May; with `cr_onset` 40 the release peaks around day 170 (mid-June), during needle elongation. **To confirm** with Schiestl-Aalto et al. (2013, Annals of Botany) or the dissertation (Schiestl-Aalto 2017), which give timing in heat sums |
+| `cr_onset` | LogNormal(median 40 d, sdlog 0.35) | 20 to 79 days | length of shoot and needle elongation, roughly May to July; inside the published 10 to 100 |
+| `d_fall` | Normal(265, 15) | day 236 to 294 | day of maximum needle fall (D25: the paper says the offset places the maximum loss rate on `d_fall`); Scots pine needle fall in Finland mostly late August to October. **To confirm** from monthly litterfall data |
+| `cr_fall` | LogNormal(median 60 d, sdlog 0.35) | 30 to 119 days | spread of needle fall over about two months; inside the published 20 to 150 |
+| `c_lf` | Beta(14.51, 39.24) | 0.16 to 0.40 (needle life 2.5 to 6.2 years) | mean needle retention 3.4 to 4.2 years in southern Finland (Pensa and Jalkanen 1999); mean 0.27 (3.7 years). 0.3% below 0.125, the edge of the D31 polynomial |
+
+Day positions use a plain normal prior (smooth, no bounds needed because the window is far from day 0 and day 365); `cr_fall` moves from interval to log scale (D32 re-applied). Days are counted on the continuous counter (D30), with day 1 = 1 January 1997.
+
+### D38. Priors, group 5: canopy (`lma`, `ceff`), and the LAI convention (closes D29)
+- **`lma ~ LogNormal(median 185 g C m-2, sdlog 0.25)`**, 95% 113 to 302. **Basis:** foliage carbon from needle litterfall / `c_lf` = 154 / 0.26, about 590 g C m-2 (Ilvesniemi et al. 2009), divided by site LAI. Kolari (2010) gives all-sided LAI 6.5 to 8; as hemisurface LAI (divide by 2) this is 3.2 to 4.0, giving `lma` about 165; as projected LAI (divide by 2.57) 2.5 to 3.1, giving about 210. **The LAI convention question (M9) is resolved by putting it inside the prior:** the median sits between the two conventions and the 95% range covers both. One run instead of two sensitivity runs, and the uncertainty is stated honestly (Gelman et al. 2020, Section 7.3: uncertainty belongs in the prior). Note: about a third of the prior lies above the official code's upper limit of 200 (from Kattge et al. 2011), but inside the 2015 paper's 400.
+- **`ceff ~ LogNormal(median 16.5, sdlog 0.41)`**, 95% 7.4 to 37. **Basis:** `ceff` replaces `p11 x N` (nitrogen-use efficiency x foliar nitrogen per leaf area). `p11 = 7.4` belongs to the same ACM fit as the fixed coefficients (D22, Chuter et al. 2015, Loobos); with needle N between about 1 and 5 g N m-2 leaf area this gives 7.4 to 37, which also contains the Loobos value 29.6 and most of the previous repository's REFLEX range 5 to 20. **To check:** a Hyytiala needle N per area value would narrow this.
+
+### D39. Priors, group 6: starting pools on 1 January 1997 (implements D27)
+All log-normal, centred on Hyytiala measurements (Ilvesniemi et al. 2009, Fig. 6 and Table 4).
+
+| Pool | Median | sdlog | 95% | Basis |
+|---|---|---|---|---|
+| `c_lab_0` | 77 | 0.50 | 29 to 205 | one year of labile allocation (`f_lab` x GPP, about 0.073 x 1,030), held over winter for the spring flush |
+| `c_fol_0` | 590 | 0.30 | 328 to 1,062 | needle litterfall 154 / `c_lf` 0.26 |
+| `c_roo_0` | 238 | 0.30 | 132 to 429 | measured fine-root biomass 476 g m-2 dry mass, halved for carbon |
+| `c_woo_0` | 5,900 | 0.25 | 3,600 to 9,600 | tree carbon 6,800 minus foliage, labile and fine roots |
+| `c_lit_0` | 450 | 0.50 | 170 to 1,200 | litter input about 260 g C m-2 yr-1 times a field residence of about 1.8 years (D35 litter rate, D35 share to soil) |
+| `c_som_0` | 6,100 | 0.25 | 3,700 to 10,000 | soil carbon 6,560 minus the litter pool |
+
+**Caveats:** the measurements are from the 2000s while the run starts in 1997 (the stand was younger, and a thinning followed in 2002); the widths are set to absorb this. The litter pool rests on a steady-state argument and is the least certain, hence its wider prior. The soil measurement also informs `theta_som` (D35); the prior predictive check tests whether the implied soil respiration is sensible.
+
+### Summary of step 3
+24 sampled quantities: `f_auto`, the 4-share Dirichlet (3 free), 4 turnover rates, `h`, `Theta`, 5 phenology, `lma`, `ceff`, 6 starting pools. Every prior is smooth (D33) and has a stated source or reason; three values are marked **to confirm** (phenology timing, needle fall timing, needle N). Next: judge them together in the prior predictive check (D35, way forward 1).
+
+### D40. Prior predictive check: pass criteria, written before running (Gelman et al. 2020, Section 2.4)
+**Set-up.** 1,000 draws from all priors (D34 to D39) at once; each draw runs DALEC2 over the full calibration block (1997 to 2010, 5,113 days) with the real drivers; frost switch off (main) and once on (D24). No NEE observations are used: the check asks whether the priors describe a **believable boreal pine forest**, not whether they fit the tower data. The observed NEE climatology may be shown in a figure for context only; nothing is tuned to it.
+
+**Tier 1: physically impossible.** A draw fails if any of these happens on any day:
+- a pool becomes negative or not a number;
+- LAI (`C_fol / lma`) above 12;
+- daily GPP above 20 g C m-2 d-1;
+- annual GPP above 3,000 g C m-2 yr-1.
+**Target: at most 5% of draws fail Tier 1.** (The previous repository's published-range priors: 84% impossible.)
+
+**Tier 2: plausible for this forest.** Broad bands, about half to double the independent site values (Ilvesniemi et al. 2009; Kolari 2010), averaged over 1997 to 2010:
+| Quantity | Band | Site value |
+|---|---|---|
+| annual GPP | 500 to 2,200 g C m-2 yr-1 | 952 to 1,104 |
+| annual heterotrophic respiration | 145 to 740 | 290 to 370 |
+| annual NEE | -700 to +300 (sink or source allowed) | a sink |
+| peak LAI | 1.5 to 8 | about 2.5 to 4 |
+| foliage pool, end / start | 1/3 to 3 | (no runaway or collapse) |
+| wood pool, end / start | at least 0.8 | growing stand |
+| soil pool, end / start | 0.7 to 1.3 | soil changes slowly |
+**Target: at least half of the draws pass every Tier-2 check;** the pass rate of each check is reported separately. The site GPP value is itself partly derived from tower data, so its band is deliberately wide.
+
+**Why these targets:** Gelman et al. (2020) set no numbers; the principle is that the prior should rule out the impossible while still allowing more than the plausible. The 5% and 50% are judgements, stated here before the check is run so they cannot be adjusted after seeing the results.
+
+**If the check fails:** find which priors drive the failures (compare the parameter values of failing and passing draws), change only those, and only with a stated source or reason; record every change here and re-run. The frost-switch run is reported alongside, not used to pick between them.
+
 ---
 
 ## Part 3. Likelihood
@@ -373,8 +468,11 @@ These will be reviewed when the work reaches them (allocation, ACM form, LAI con
 - Bloom, A. A. and Williams, M. (2015). Constraining ecosystem carbon dynamics in a data-limited world: integrating ecological "common sense" in a model-data fusion framework. Biogeosciences 12, 1299-1315.
 - Bloom, A. A., Exbrayat, J.-F., van der Velde, I. R., Feng, L. and Williams, M. (2016). The decadal state of the terrestrial carbon cycle: global retrievals of terrestrial carbon allocation, pools, and residence times. PNAS 113(5), 1285-1290. (Version of DALEC2 in the CARDAMOM code `DALEC_400`.)
 - CARDAMOM framework, source code. github.com/CARDAMOM-framework/CARDAMOM, files `C/projects/CARDAMOM_MODELS/DALEC/DALEC_400/DALEC_400.c`, `PARS_INFO_400.c`, `DALEC_ALL/ACM.c`, `DALEC_ALL/offset.c` (read 2026-10-13).
+- Brunner, I. et al. (2013). Fine-root turnover rates of European forests revisited: an analysis of data from sequential coring and ingrowth cores. Plant and Soil 362, 357-372.
+- Coleman, K., Prout, J. M. and Milne, A. E. (2024). RothC: a model for the turnover of carbon in soil. Model description. Rothamsted Research.
 - Chuter, A. M., Aston, P. J., Skeldon, A. C. and Roulstone, I. (2015). A dynamical systems analysis of the data assimilation linked ecosystem carbon (DALEC) models. Chaos 25(3), 036401. (Journal details from the previous repository; the quote in D20 was read from the manuscript at personalpages.surrey.ac.uk/a.skeldon/DALEC_paper.pdf, dated 8 December 2014. Check against the published article.)
 - Delahaies, S., Roulstone, I. and Nichols, N. (2017). Constraining DALEC v2 using multiple data streams and ecological constraints: analysis and application. Geoscientific Model Development 10, 2635-2650.
+- DeLucia, E. H., Drake, J. E., Thomas, R. B. and Gonzalez-Meler, M. (2007). Forest carbon use efficiency: is respiration a constant fraction of gross primary production? Global Change Biology 13, 1157-1167.
 - Douglas, et al. (2026). Regularisation of the 4DEnVar data assimilation method for calibration of land surface models. EGUsphere preprint.
 - Famiglietti, C. A. et al. (2021). Optimal model complexity for terrestrial carbon cycle prediction. Biogeosciences 18, 2727.
 - Fang, et al. Differentiable land model reveals global environmental controls on ecological parameters. arXiv:2411.09654.
@@ -382,13 +480,21 @@ These will be reviewed when the work reaches them (allocation, ACM form, LAI con
 - Fox, A. et al. (2009). The REFLEX project: comparing different algorithms and implementations for the inversion of a terrestrial ecosystem model against eddy covariance data. Agricultural and Forest Meteorology 149, 1597-1615.
 - Gelman, A. et al. (2020). Bayesian Workflow. arXiv:2011.01808 (Section 10.5, pp. 53-54; Section 7.1).
 - Hollinger, D. Y. and Richardson, A. D. (2005). Uncertainty in eddy covariance measurements and its application to physiological models. Tree Physiology 25.
+- Kattge, J. et al. (2011). TRY: a global database of plant traits. Global Change Biology 17, 2905-2935. (Cited in the official code for the lma range.)
+- Kolari, P. (2010). Dissertationes Forestales 99, doi:10.14214/df.99.
 - Kuppel, S. et al. (2012). Constraining a global ecosystem model with multi-site eddy-covariance data. Biogeosciences 9, 3757-3776.
+- Mahecha, M. D. et al. (2010). Global convergence in the temperature sensitivity of respiration at ecosystem level. Science 329, 838-840.
+- Pensa, M. and Jalkanen, R. (1999). Needle chronologies on Pinus sylvestris in northern Estonia and southern Finland. Silva Fennica 33(3), 171-177. doi:10.14214/sf.654 (pages to check)
 - Pastorello, G. et al. (2020). The FLUXNET2015 dataset and the ONEFlux processing pipeline for eddy covariance data. Scientific Data 7, 225.
 - Pu, et al. (2025). MCI GPP. Scientific Data.
 - Pinnington, E. M. et al. (2016). Investigating the role of prior and observation error correlations in improving a model forecast of forest carbon balance using Four-dimensional Variational data assimilation. Agricultural and Forest Meteorology 228-229, 299-314.
 - Richardson, A. D. et al. (2010). Estimating parameters of a forest ecosystem C model with measurements of stocks and fluxes as joint constraints. Oecologia 164, 25-40.
 - Smallman, T. L. and Williams, M. (2019). Description and validation of an intermediate complexity model for ecosystem photosynthesis and evapotranspiration: ACM-GPP-ETv1. Geoscientific Model Development 12, 2227-2253.
+- Schiestl-Aalto, P. et al. (2013). Duration of shoot elongation in Scots pine varies within the crown and between years. Annals of Botany. doi:10.1093/aob/mct180 (title and year to check)
+- Schiestl-Aalto, P. (2017). Modelling intra- and inter-annual growth dynamics of Scots pine in the whole-tree carbon balance framework. Dissertationes Forestales 234.
 - Stettz, S. G. et al. (2022). Resolving temperature limitation on spring productivity in an evergreen conifer forest using a model-data fusion framework. Biogeosciences 19, 541-558.
+- Tuomi, M. et al. (2009). Leaf litter decomposition: estimates of global variability based on Yasso07 model. Ecological Modelling 220, 3362-3371. (Cited via the previous repository; check.)
+- Waring, R. H., Landsberg, J. J. and Williams, M. (1998). Net primary production of forests: a constant fraction of gross primary production? Tree Physiology 18, 129-134.
 - Tramontana, G. et al. (2016). Predicting carbon dioxide and energy fluxes across global FLUXNET sites with regression algorithms. Biogeosciences 13, 4291.
 - Williams, M. et al. (2009). Improving land surface models with FLUXNET data. Biogeosciences 6, 1341-1359.
 - Yuan, Q. et al. (2025). Global carbon flux dataset generated by fusing remote sensing and multiple flux networks observation. Scientific Data.
