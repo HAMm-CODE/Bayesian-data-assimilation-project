@@ -260,6 +260,9 @@ It only changes the prior range of `lma`, so it is decided with that prior in st
 ### D30. Phenology uses a continuous day counter (M10)
 The leaf onset and leaf fall pulses use `t`, the number of days since the start of the run, not the day of year. **Why:** the official code does this (`MET[:,0]`, "projday"). With a 365.25-day cycle, a day-of-year counter that restarts every 1 January causes a small jump each year. Day length (B5) still uses the day of year, as in the code.
 
+### D31. Leaf-fall offset `psi` from the official code's polynomial (A9)
+`psi` is computed with the sixth-order polynomial in `log(L - 1)`, `L = 1 / c_lf`, from `DALEC_ALL/offset.c`. **How it was settled:** the polynomial matches the equation `2 sqrt(pi) psi = log(1 - c_lf) exp(-psi^2)` within 0.004 for leaf lifespans 1.001 to 8 years; it does not match the previous repository's form (`log(1 - c_lf)` on the other side), which gave an offset about 8 times too large at `c_lf = 0.25` (about 24 days too early or late for a 60-day fall period). The A7 constants 0.6245 and 6.9088 come out of the same polynomial at `L = 1.001`, which confirms the reading. **Why the polynomial, not an exact root:** `c_lf` is now sampled (D26), so `psi` must change smoothly with it for NUTS gradients; the polynomial is differentiable, the root solve is not without extra work, and it is what DALEC2's authors run. Limit: valid for `L` in 1.001 to 8 years only, which covers Scots pine needles (3 to 5 years). **Still to check:** the printed A9 in the PDF, to tell a paper typo from a copying error.
+
 ---
 
 ## Part 3. Likelihood

@@ -148,15 +148,31 @@ of the foliage drops into the litter. Both are bell-shaped pulses once a year.
 
      s = 365.25 / pi
 
-(A9) psi solves  2 sqrt(pi) log(1 - c_lf) psi - exp(-psi^2) = 0,   psi_f = psi cr_fall / sqrt(2)
+(A9) psi solves  2 sqrt(pi) psi = log(1 - c_lf) exp(-psi^2),   psi_f = psi cr_fall / sqrt(2)
+     (form recovered from the official code; computed with its polynomial, D31)
 ```
 
-`psi` is not a parameter: it is calculated from `c_lf`. The previous repository
-solved A9 numerically. The official code instead uses a fitted sixth-order
-polynomial (`offset.c`) written in leaf lifespan `L = 1 / c_lf`; both should
-give the same offset. **Check against the PDF:** one text extraction of the
-paper showed `exp(-psi^2 / 2)` in A9 instead of `exp(-psi^2)`. The code's
-polynomial can settle this numerically.
+`psi` is not a parameter: it is calculated from `c_lf`. The official code uses
+a fitted sixth-order polynomial (`offset.c`) in `log(L - 1)`, with leaf lifespan
+`L = 1 / c_lf`:
+
+```
+psi = sum_k m_k (log(L - 1))^k,   k = 6 ... 0
+m = 2.3599784710e-5, 3.32730053021e-4, 9.01865258885e-4, -5.437736864888e-3,
+    -2.0836027517787e-2, 0.126972018064287, -0.188459767342504
+```
+
+**How A9 was settled (2026-10-13).** The polynomial was compared numerically
+with candidate equations. It matches `2 sqrt(pi) psi = log(1 - c_lf) exp(-psi^2)`
+to within 0.004 over leaf lifespans of 1.001 to 8 years. It does **not** match
+the previous repository's form, `2 sqrt(pi) log(1 - c_lf) psi = exp(-psi^2)`,
+which puts `log(1 - c_lf)` on the wrong side; at `c_lf = 0.25` that form gives
+`psi = -0.646` against the code's `-0.079`, an offset about 8 times too large.
+The `exp(-psi^2/2)` reading is not supported either. Two cross-checks: the same
+polynomial at `L = 1.001` gives `-0.88318`, and `0.88318 / sqrt(2) = 0.6245`,
+the constant in A7; and `log(1001) = 6.9088`, the other A7 constant. So A7 is
+the onset version of the same rule. Whether the printed A9 has a typo or the
+previous repository mis-copied it must be checked in the PDF.
 
 The `sin` has a period of 730.5 days, and it is squared, so each pulse repeats
 every 365.25 days.
