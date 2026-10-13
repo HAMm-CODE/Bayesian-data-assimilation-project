@@ -130,3 +130,13 @@ def test_rejects_drivers_with_gaps():
     t_max[10] = np.nan
     with pytest.raises(ValueError, match="missing"):
         Drivers(t=d.t, doy=d.doy, t_max=t_max, t_min=d.t_min, sw_in=d.sw_in, co2=d.co2)
+
+
+def test_pool_bookkeeping_inputs_minus_outputs_equal_change():
+    """For every pool: total in - total out = end - start (needed by the D44 constraint)."""
+    out = run(median_parameters(), synthetic_drivers(2), latitude_deg=LAT)
+    for name in out.pools_end:
+        change = out.pools_end[name] - out.pools_start[name]
+        assert np.allclose(out.pools_in[name] - out.pools_out[name], change, atol=1e-8)
+    # yearly snapshots on day 0, 365, 730
+    assert out.pools_yearly["c_fol"].shape[-1] == 3

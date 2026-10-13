@@ -232,6 +232,20 @@ about -25 degC. The main model runs **without** it (D24). It stays available as
 a switch for one prior predictive check and one sensitivity run. It is safe for
 the sampler because it depends only on the inputs, never on a parameter.
 
+### 3.6 Soft steady-state constraint on the foliage (part of the prior, D44)
+
+Not part of the model's equations; it is an extra term in the prior. After each
+run, for the foliage pool:
+
+```
+Rs = (total inputs / total outputs over the run) x (mean pool on each 1 January) / (starting pool)
+log prior += -0.5 (log Rs / log 2)^2
+```
+
+`Rs = 1` means the needles are replaced as fast as they fall. This is the smooth
+("Gaussian") version of DALEC2's own steady-state constraints in the official
+code (`EDC2_400.c`, EDCs 7 to 12, equilibrium factor 2).
+
 ## 4. Corrections to the published equations
 
 Found by the previous repository by checking the paper against itself. To be

@@ -27,7 +27,7 @@ from dalec.plotting import (
     BLUE, GREY_LIGHT, INK, INK_SOFT, UNIT_FLUX,
     apply_style, climatology, day_of_year_365, heading, save_figure, set_year_axis,
 )
-from dalec.priors import PRIORS, sample_prior
+from dalec.priors import PRIORS, edc_log_weight, sample_prior, steady_state_ratio
 
 # ---------------------------------------------------------------------------
 # D40 criteria (copied from DECISIONS.md; change only together with D40)
@@ -84,6 +84,9 @@ def summarise_batch(out, years: np.ndarray, weights: np.ndarray) -> dict[str, np
         "wood_ratio": out.pools_end["c_woo"] / out.pools_start["c_woo"],
         "soil_ratio": out.pools_end["c_som"] / out.pools_start["c_som"],
         "nee_cycle": out.nee @ weights,   # (draws, 365)
+        "foliage_rs": steady_state_ratio(out.pools_in["c_fol"], out.pools_out["c_fol"],
+                                         out.pools_yearly["c_fol"].mean(axis=-1),
+                                         out.pools_start["c_fol"]),
     }
 
 
@@ -189,6 +192,36 @@ def parameter_table(raw, tier1_links, tier2_links, config) -> None:
     print(f"\n  saved {path}")
 
 
+def edc_weights(m: dict[str, np.ndarray]) -> np.ndarray:
+    """Weight of each draw under the soft steady-state constraint on the foliage (D44), max = 1."""
+    log_w = edc_log_weight(m["foliage_rs"])
+    return np.exp(log_w - np.max(log_w[np.isfinite(log_w)]))
+
+
+def weighted_report(result: dict[str, Any], w: np.ndarray, title: str) -> None:
+    """D40 rates when every draw counts with its soft-constraint weight (D44).
+
+    This is importance re-weighting (Gelman et al. 2020, Section 6.3): it shows
+    what the prior with the soft constraint would give, without new draws.
+    """
+    heading(title)
+    total = w.sum()
+    ess = total**2 / np.sum(w**2)
+    print(f"  effective number of draws after weighting: {ess:.0f} of {w.size}")
+    print(f"  draws with almost no weight (below 1%): {np.mean(w < 0.01):.1%}")
+    t1 = np.sum(w * result["tier1_fail"]) / total
+    print(f"  Tier 1, physically impossible: {t1:6.1%} (target at most {TIER1_TARGET:.0%})"
+          f"  -> {'PASS' if t1 <= TIER1_TARGET else 'FAIL'}")
+    for reason, flag in result["tier1_reasons"].items():
+        if flag.any():
+            print(f"      {reason:24s} {np.sum(w * flag) / total:6.1%}")
+    t2 = np.sum(w * result["tier2_all"]) / total
+    print(f"  Tier 2, plausible for Hyytiala: {t2:6.1%} pass every check (target at least "
+          f"{TIER2_TARGET:.0%})  -> {'PASS' if t2 >= TIER2_TARGET else 'FAIL'}")
+    for name, flag in result["tier2"].items():
+        print(f"      {name:14s} {np.sum(w * flag) / total:6.1%} inside the band")
+
+
 # ---------------------------------------------------------------------------
 # Figures
 # ---------------------------------------------------------------------------
@@ -268,6 +301,11 @@ def main() -> None:
     frost = float(config["model"]["frost_cutoff"]["threshold_degc"])
     frost_run = run_all(params, drivers, latitude, frost, years, weights, int(settings["batch_size"]))
     report(evaluate(frost_run), f"Prior predictive check, frost cut-off at {frost} degC")
+
+    weighted_report(main_result, edc_weights(main_run),
+                    "With the soft foliage constraint (D44), main model, by re-weighting")
+    weighted_report(evaluate(frost_run), edc_weights(frost_run),
+                    "With the soft foliage constraint (D44), frost switch on, by re-weighting")
 
     heading("Medians of the plausible draws (main model)")
     ok = ~main_result["tier1_fail"]

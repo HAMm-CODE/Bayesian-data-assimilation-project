@@ -88,3 +88,33 @@ def sample_prior(n: int, rng: np.random.Generator) -> tuple[Parameters, dict[str
 
     model_fields: dict[str, Any] = {k: v for k, v in raw.items() if k != "h"}
     return Parameters(**model_fields), raw
+
+
+# ---------------------------------------------------------------------------
+# Soft steady-state constraint on the foliage pool (D44).
+#
+# Follows the official DALEC2 code (CARDAMOM, DALEC_400/EDC2_400.c, "EDCs 7-12"):
+# for a pool, Rm = total inputs / total outputs over the run, and
+# Rs = Rm x (mean pool on each 1 January) / (pool at the start). A pool in
+# balance has Rs = 1. The code rejects a draw when |log Rs| > log(EQF), and also
+# stores a Gaussian version, -0.5 (log Rs / log EQF)^2 ("EDCPROB"). We use that
+# smooth version, so NUTS can follow its gradient, on the foliage pool only.
+# EQF = 2 is the code's default ("equilibrium factor").
+# ---------------------------------------------------------------------------
+
+EDC_EQF = 2.0
+
+
+def steady_state_ratio(total_in, total_out, mean_january, start):
+    """Rs of EDC2_400.c: 1 when the pool is in balance; above 1 when it grows, below 1 when it shrinks."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return (np.asarray(total_in) / np.asarray(total_out)) * np.asarray(mean_january) / np.asarray(start)
+
+
+def edc_log_weight(rs, eqf: float = EDC_EQF):
+    """Smooth penalty -0.5 (log Rs / log EQF)^2; 0 at balance, -0.5 at a factor of EQF away.
+    A run that broke down (Rs not a positive number) gets weight zero (-inf)."""
+    rs = np.asarray(rs, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        log_w = -0.5 * (np.log(rs) / np.log(eqf)) ** 2
+    return np.where(np.isfinite(log_w), log_w, -np.inf)

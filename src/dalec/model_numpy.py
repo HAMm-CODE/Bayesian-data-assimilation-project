@@ -193,6 +193,9 @@ class Output:
     pools_start: dict[str, np.ndarray]
     pools_end: dict[str, np.ndarray]
     pools_min: dict[str, np.ndarray]   # smallest value each pool reached
+    pools_in: dict[str, np.ndarray]    # total carbon that entered each pool over the run
+    pools_out: dict[str, np.ndarray]   # total carbon that left each pool over the run
+    pools_yearly: dict[str, np.ndarray]  # pool on day 0, 365, 730, ... (draws, snapshots)
     total_carbon: np.ndarray   # sum of all pools, (draws, days + 1)
 
     @property
@@ -218,6 +221,9 @@ def run(params: Parameters, drivers: Drivers, *, latitude_deg: float,
     pools = {name: p[f"{name}_0"].copy() for name in POOLS}
     start = {name: v.copy() for name, v in pools.items()}
     lowest = {name: v.copy() for name, v in pools.items()}
+    flow_in = {name: np.zeros(shape) for name in POOLS}
+    flow_out = {name: np.zeros(shape) for name in POOLS}
+    yearly = {name: [v.copy()] for name, v in pools.items()}
 
     out = {k: np.empty(shape + (n_days,)) for k in ("gpp", "ra", "rh", "nee", "lai")}
     total = np.empty(shape + (n_days + 1,))
@@ -258,6 +264,16 @@ def run(params: Parameters, drivers: Drivers, *, latitude_deg: float,
         pools["c_som"] = c_som + litter_to_soil + wood_litter - rh_soil
 
         rh = rh_litter + rh_soil
+        for name, gain, loss in (
+            ("c_lab", p["f_lab"] * gpp, labile_release),
+            ("c_fol", p["f_fol"] * gpp + labile_release, leaf_litter),
+            ("c_roo", p["f_roo"] * gpp, root_litter),
+            ("c_woo", p["f_woo"] * gpp, wood_litter),
+            ("c_lit", leaf_litter + root_litter, rh_litter + litter_to_soil),
+            ("c_som", litter_to_soil + wood_litter, rh_soil),
+        ):
+            flow_in[name] += gain
+            flow_out[name] += loss
         out["gpp"][..., i] = gpp
         out["ra"][..., i] = ra
         out["rh"][..., i] = rh
@@ -266,7 +282,11 @@ def run(params: Parameters, drivers: Drivers, *, latitude_deg: float,
         total[..., i + 1] = sum(pools.values())
         for name in POOLS:
             np.minimum(lowest[name], pools[name], out=lowest[name])
+            if (i + 1) % 365 == 0:
+                yearly[name].append(pools[name].copy())
 
     return Output(gpp=out["gpp"], ra=out["ra"], rh=out["rh"], nee=out["nee"],
                   lai=out["lai"], pools_start=start, pools_end=pools, pools_min=lowest,
+                  pools_in=flow_in, pools_out=flow_out,
+                  pools_yearly={k: np.stack(v, axis=-1) for k, v in yearly.items()},
                   total_carbon=total)

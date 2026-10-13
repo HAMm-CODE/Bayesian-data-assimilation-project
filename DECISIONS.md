@@ -373,11 +373,25 @@ Following F12 and D40 ("change only the priors linked to failure, with a stated 
 - **Gelman et al. (2020, Section 2.4)** allow priors to be revised after a prior predictive check, because no observations enter it; the revision must rest on outside knowledge (here a published prior), and both rounds are reported.
 - **Options not taken:** (B) setting `ceff` so that the implied annual GPP matches the site's plausible range (prior elicitation on an observable, also Section 2.4; rejected for now because the site GPP comes partly from the same tower); (C) keeping D38 and accepting the failure.
 
-### D43. Prior predictive round 3: `c_lf` prior narrowed to its source (PROPOSED, 2026-10-13; awaiting the re-run)
+### D43. Prior predictive round 3: `c_lf` prior narrowed to its source (DECIDED 2026-10-13, after the re-run, F14)
 - **New:** `c_lf ~ Beta(43.84, 122.84)`: mean 0.263, 95% 0.199 to 0.332, i.e. needle lifespan **3.0 to 5.0 years**.
 - **Replaces** D37's `Beta(14.51, 39.24)` (lifespan 2.5 to 6.2 years).
 - **Why:** `c_lf` is the only prior linked to both failure modes (F13). D37's prior was **wider than its own source**: Pensa and Jalkanen (1999) report mean needle retention of 3.4 to 4.2 years in southern Finland; 3 to 5 years covers that with a margin (the previous repository used the same 3 to 5 years). Narrowing a prior to what its source supports is outside knowledge, not tuning to the check (D40, Gelman et al. 2020, Section 2.4).
 - **Not changed in this round:** `lma` (linked to Tier 1, but its width reflects the unresolved LAI convention, D38); kept for round 4 if needed.
+
+### D44. Soft steady-state constraint on the foliage pool (PROPOSED, 2026-10-13; awaiting the re-run)
+**What.** The joint prior gets one extra smooth term: `log p += -0.5 (log Rs / log 2)^2`, where for the foliage pool `Rs = (total inputs / total outputs over the run) x (mean pool on each 1 January) / (pool at the start)`. A foliage pool in balance has `Rs = 1` and no penalty; a pool running away (`Rs` above 1) or collapsing (below 1) is made less likely, smoothly. Code: `steady_state_ratio` and `edc_log_weight` in `priors.py`.
+
+**Source: the official DALEC2 code.** `DALEC_400/EDC2_400.c` implements "EDCs 7-12" exactly this way for every pool, with equilibrium factor `EQF = 2` by default: it rejects a draw when `|log Rs| > log(EQF)` and also stores the Gaussian version `-0.5 (log Rs / log EQF)^2` ("EDCPROB"). The growth-rate and decay-rate rules described as EDC 7 and EDC 8 in Bloom and Williams (2015) are commented out in that code version and replaced by this steady-state form. Where paper and code differ we follow the code (as in D21 to D31).
+
+**Why soft, and why foliage only.**
+- Hard accept/reject rules break NUTS (the carried-over reason for dropping EDCs). The Gaussian form is smooth, so NUTS can follow its gradient: it turns "no EDCs" into "**soft EDCs only**". This revises a carried-over decision and should be raised with the supervisor.
+- Foliage only, because the prior predictive check points to the canopy (F12 to F14). The official code applies it to all six pools, but Bloom and Williams (2015) chose sites near steady state; Hyytiala is a growing, managed stand (thinned in 2002), so a steady-state rule on wood would penalise real growth.
+- In Gelman et al. (2020, Section 7.3) terms, it is a **joint prior**: a statement about what the parameters do together, which the independent priors could not express.
+
+**How it is tested.** The prior predictive script re-weights the same 1,000 draws by the constraint (importance re-weighting, Gelman et al. 2020, Section 6.3) and reports the D40 rates under the new joint prior, plus the effective number of draws. No new sampling is needed.
+
+**Honest caveat.** The constraint and the Tier-2 "foliage end/start" check measure related things, so part of the improvement is expected by construction. The justification for adding it is the official code, not the check.
 
 ---
 
@@ -475,7 +489,20 @@ Implementation: the observation model is a config setting (`randunc_only` now; `
 - **Links:** Tier 1 (runaway canopy): low `lma`, high `ceff`, low `c_lf`, low `f_auto`, high `f_lab` and `f_fol`. Tier 2 (mainly canopy collapse): high `c_lf` (+0.40) first.
 - **Reading:** the canopy is unstable in both directions. Needles are lost at rate `c_lf` and replaced by allocation `f_fol + f_lab` times GPP, which itself depends on leaf area (`C_fol / lma`) and `ceff`. These four priors are set independently, so some combinations replace needles faster than they fall (runaway) and others slower (collapse): the joint effect Gelman et al. (2020, Section 7.3) warn about. `c_lf` appears in both failure modes.
 - **Frost switch on:** Tier 1 6.9%, Tier 2 42.2%.
+- **Re-run with the full parameter table (same seed): identical numbers**, so the check is reproducible. Full list adds `f_woo` (+0.43, Tier 1; low `f_auto` leaves more carbon for every plant pool) and, for Tier 2, `theta_woo` (+0.22) and `c_som_0` (-0.21). **Caution on reading links:** with about 93 failing draws, a standardised difference has a standard error of roughly 0.11, and 24 quantities are compared at once; links below about 0.3 (here `c_som_0`, `d_fall`, `theta_woo`) may be chance and are not acted on.
 - **Figure L:** winter and autumn still match; the spring early uptake remains (structural, F12); the prior median summer uptake (about -1.3) is now weaker than observed (about -3), but the observed values stay inside the 5 to 95% band.
+
+**F14. Prior predictive check, round 3 (only `c_lf` changed, D43; real data, 2026-10-13).**
+| | Round 1 | Round 2 | **Round 3** | Target |
+|---|---|---|---|---|
+| Tier 1, impossible | 34.7% | 9.3% | **8.6%** | at most 5% |
+| Tier 2, pass all | 29.7% | 42.6% | **47.6%** | at least 50% |
+| foliage end/start inside band | 48.5% | 55.7% | **61.8%** | |
+| GPP median (plausible draws) | 1,560 | 1,061 | **1,122** | site about 1,030 |
+- With the frost switch on: Tier 1 5.8%, Tier 2 46.0%.
+- Medians: Rh 433, NEE -93, peak LAI 3.4, foliage 0.63, wood 1.31, soil 1.00.
+- Links: Tier 1 still the canopy group (`ceff` +1.15, `lma` -1.11, `f_auto` -0.81, `f_lab` +0.78, `f_fol` +0.68, `c_lf` -0.67); Tier 2 links all below 0.3 (`c_lf` +0.29), i.e. no single prior stands out any more.
+- **Reading:** both targets are now narrowly missed, and narrowing single priors has reached diminishing returns (Tier 1: 34.7, 9.3, 8.6). The remaining failures are canopy runaway and collapse, which is exactly what Bloom and Williams (2015) remove with their ecological dynamic constraints EDC 7 (no pool grows faster than 10% per year) and EDC 8 (no pool decays with a half-life under 3 years). This project dropped EDCs because hard accept/reject rules break NUTS (carried-over decision).
 
 **F6. Evaluation block.** 608 of 1,461 evaluation days (41.6%) are excluded only because RANDUNC is missing: all of 2014 and the first half of 2011.
 
@@ -495,7 +522,7 @@ Implementation: the observation model is a config setting (`randunc_only` now; `
 
 These will be reviewed when the work reaches them (allocation, ACM form, LAI convention and `d_fall` were re-assessed on 2026-10-13: D21, D25, D28, D29):
 
-- No EDC constraints (they break differentiability for NUTS).
+- No hard EDC constraints (they break differentiability for NUTS); a soft, smooth version on the foliage pool is proposed in D44.
 - No VPD driver.
 - NUTS as the only sampler.
 
