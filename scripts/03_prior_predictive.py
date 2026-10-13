@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from dalec.config import load_config, year_block
+from dalec.config import load_config, resolve_path, year_block
 from dalec.data_io import MASK_NEE, MASK_QC, load_model_block
 from dalec.model_numpy import POOLS, drivers_from_frame, run
 from dalec.plotting import (
@@ -150,23 +150,43 @@ def prior_scale(name: str, values: np.ndarray) -> np.ndarray:
     return values
 
 
-def drivers_of_failure(raw: dict[str, np.ndarray], failed: np.ndarray, label: str) -> None:
-    """Which priors push draws into failure? Standardised difference of means
-    between failing and passing draws, on each prior's own scale."""
+def drivers_of_failure(raw: dict[str, np.ndarray], failed: np.ndarray, label: str) -> dict[str, float]:
+    """Which priors push draws into failure? For every sampled quantity, the
+    standardised difference of means between failing and passing draws, on the
+    prior's own scale. 0 = no link; about 0.2 or more (either sign) = worth a look."""
     if failed.all() or not failed.any():
-        return
-    rows = []
+        return {}
+    links = {}
     for name, values in raw.items():
         if name == "theta_min":      # follows from theta_lit and h
             continue
         x = prior_scale(name, values)
-        diff = (x[failed].mean() - x[~failed].mean()) / x.std()
-        rows.append((abs(diff), name, diff))
-    rows.sort(reverse=True)
-    print(f"\n  Priors most linked to '{label}' (standardised difference, failing minus passing):")
-    for _, name, diff in rows[:6]:
+        links[name] = float((x[failed].mean() - x[~failed].mean()) / x.std())
+    print(f"\n  All sampled quantities, linked to '{label}' (failing minus passing):")
+    for name, diff in sorted(links.items(), key=lambda kv: -abs(kv[1])):
         direction = "higher" if diff > 0 else "lower"
-        print(f"      {name:22s} {diff:+.2f}  (failing draws have {direction} values)")
+        flag = "  <-- worth a look" if abs(diff) >= 0.2 else ""
+        print(f"      {name:22s} {diff:+.2f}  (failing draws have {direction} values){flag}")
+    return links
+
+
+def parameter_table(raw, tier1_links, tier2_links, config) -> None:
+    """One row per sampled quantity: prior spread and link to each failure. Saved as csv."""
+    rows = []
+    for name, values in raw.items():
+        rows.append({
+            "parameter": name,
+            "p05": np.percentile(values, 5),
+            "median": np.median(values),
+            "p95": np.percentile(values, 95),
+            "link_tier1_failure": tier1_links.get(name, np.nan),
+            "link_tier2_failure": tier2_links.get(name, np.nan),
+        })
+    table = pd.DataFrame(rows).set_index("parameter")
+    path = resolve_path(config["paths"]["figures"]) / "prior_predictive_parameters.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(path, float_format="%.6g")
+    print(f"\n  saved {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -240,8 +260,9 @@ def main() -> None:
     main_run = run_all(params, drivers, latitude, None, years, weights, int(settings["batch_size"]))
     main_result = evaluate(main_run)
     report(main_result, "Prior predictive check, main model (D40)")
-    drivers_of_failure(raw, main_result["tier1_fail"], "Tier 1 failure")
-    drivers_of_failure(raw, ~main_result["tier2_all"], "Tier 2 failure")
+    tier1_links = drivers_of_failure(raw, main_result["tier1_fail"], "Tier 1 failure")
+    tier2_links = drivers_of_failure(raw, ~main_result["tier2_all"], "Tier 2 failure")
+    parameter_table(raw, tier1_links, tier2_links, config)
 
     heading("Same draws with the frost switch on (D24), reported alongside")
     frost = float(config["model"]["frost_cutoff"]["threshold_degc"])
