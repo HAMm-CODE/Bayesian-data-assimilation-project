@@ -6,8 +6,9 @@ Each entry is marked with a status:
 - **Decided**: settled and implemented.
 - **Proposed**: preferred option chosen, not yet final.
 - **Open**: still to be decided; the options are recorded.
+- **Replaced**: a later entry changed it. The old text stays for the record, with a note naming the entry that replaced it.
 
-Last updated: 2026-10-13.
+Last updated: 2026-10-13 (full check of every entry against the current code, config and results).
 
 ---
 
@@ -27,7 +28,7 @@ Last updated: 2026-10-13.
 - conda with the `conda-forge` channel only (`nodefaults` blocks Anaconda's default channel), because compiled scientific libraries such as PyMC and PyTensor install most reliably this way on Windows.
 - Python 3.13. Package names are unpinned while building; exact versions will be frozen into `environment.lock.yml` before producing thesis results.
 - Current versions (2026-10-07): Python 3.13.16, numpy 2.5.3, pandas 3.0.6, scipy 1.18.1, matplotlib 3.11.2.
-- PyMC is added when the model is built, as its own recorded change.
+- **Added for the model (2026-10-13):** PyMC and PyTensor (the gradient model, D46, and the sampler) and pytest (runs the tests in `tests/`). Tested on the cloud test machine with PyMC 6.3.2 and PyTensor 3.3.3. They go into `environment.yml` from conda-forge like everything else; the versions on the author's machine are the ones frozen in the lock file.
 - On Roihu, follow CSC's current recommended way of installing Python environments; the package list stays the same.
 
 ### D7. Code layout (Decided)
@@ -124,9 +125,13 @@ Last updated: 2026-10-13.
 - Every day is assigned to exactly one category: assimilable, or a single exclusion reason. Counts therefore never depend on the order of the filters and always sum to the total.
 - The report checks itself: the rows must sum to the number of days, and the assimilable count must match the mask. A failure there means a bug in the code, not in the data.
 
-### D14. Single entry point (Decided)
+### D14. Config-driven loaders (Decided; updated 2026-10-13)
 
-- All scripts load data through `load_screened_block()`, which reads every setting from the config.
+- Scripts load data only through the loaders in `src/dalec/data_io.py`, which read every setting from the config. There are three, one per need:
+  - `load_screened_block()`: NEE, sigma, QC and the masks for one block (script 01).
+  - `load_record_with_drivers()`: the whole record with the masks, the model drivers and the daily highest, lowest and midpoint temperature (script 02).
+  - `load_model_block()`: the same for one block, which is what the model runs on (script 03, and the fitting scripts to come). Added in D41.
+- (Earlier text said "a single entry point, `load_screened_block()`". That stopped being true once the model needed the drivers.)
 - Lower-level functions take plain arguments and never read the config, so they can be tested in isolation.
 - Sensitivity runs change a copy of the config in memory, never the file on disk.
 
@@ -150,15 +155,15 @@ Script `scripts/02_data_eda.py`, separate from the sigma figures because it is a
 
 **Drivers shown: the ones DALEC2 reads (Figure H), plus shallow soil temperature in Figure I.** The model keeps its current drivers. A figure of every other driver in the file (VPD, precipitation, radiation components, wind, pressure, soil water and so on) was built and then removed by the author's choice, to keep the EDA focused. Adding a driver to the model would mean new equations, and VPD would reverse an inherited decision, so that stays future work.
 
-Drivers DALEC2 reads: daily highest and lowest air temperature (from the half-hourly file, see D18) and their midpoint for respiration (D20), incoming shortwave radiation (`SW_IN_F`, converted from W m-2 to MJ m-2 d-1 by x 0.0864), atmospheric CO2 (`CO2_F_MDS`), day of year, and site latitude (61.85 N, fixed). Listed in the config under `drivers`; the full input list and the reason for each is D19.
+Drivers DALEC2 reads: daily highest and lowest air temperature (from the half-hourly file, see D18) and their midpoint for respiration (D20), incoming shortwave radiation (`SW_IN_F`, converted from W m-2 to MJ m-2 d-1 by x 0.0864), atmospheric CO2 (`CO2_F_MDS`), the date (as day of year for day length, and as a running day count for leaf timing, D30), and site latitude (61.8474 N, fixed). Listed in the config under `drivers`; the full input list and the reason for each is D19.
 
 The figures:
 
 - **F. Data availability:** one row per year of the **whole record (1996 to 2014)**, one column per day, each day coloured as assimilable, QC below threshold, or QC passes but RANDUNC missing. Lines and labels mark the excluded year, the calibration block and the evaluation block. Whole record chosen so the figure shows why 1996 is excluded and why 2014 has no assimilable days.
 - **G. NEE seasonal cycle:** one thin line per year, **calibration years and evaluation years in different colours**, with the calibration median on top. This replaces a separate calibration-versus-evaluation figure: it shows directly whether the evaluation years behave like the calibration years. Uses **QC-passing days** (sigma is not needed to describe NEE's shape; requiring it would remove 2014 entirely). Each line is a 15-day centred moving average (`eda.smoothing_days`).
 - **Spring onset (in G):** first day of **10 days in a row with net uptake (NEE < 0)** on QC-passing days (`eda.onset_run_days`), computed per year. A day that fails QC breaks the run, so a data gap can delay the onset but never create one. Same definition as the previous repository. G shows the median onset of the calibration years and their range.
-- **H. Model drivers:** air temperature (daily highest, mean and lowest; medians per day of year), incoming sunlight (median and middle half, plus potential sunlight with no atmosphere, which shows cloudiness), and CO2 as a time series (its upward trend is larger than its seasonal swing).
-- **I. NEE against drivers:** NEE against incoming sunlight, air temperature and shallowest soil temperature, **spring days highlighted**. Spring is where light and temperature separate (light is already strong while air and soil are cold), so it tests which one limits uptake, and it is where DALEC2's onset is wrong (Stettz et al. 2022; Suni et al. 2003; Makela et al. 2004). Uses QC-passing days of the calibration block.
+- **H. Model drivers:** air temperature (daily highest, midpoint and lowest, the three values the model uses; medians per day of year), incoming sunlight (median and middle half, plus potential sunlight with no atmosphere, which shows cloudiness), and CO2 as a time series (its upward trend is larger than its seasonal swing).
+- **I. NEE against drivers:** NEE against incoming sunlight, air temperature (the midpoint, D20) and shallowest soil temperature, **spring days highlighted**. Spring is where light and temperature separate (light is already strong while air and soil are cold), so it tests which one limits uptake, and it is where DALEC2's onset is wrong (Stettz et al. 2022; Suni et al. 2003; Makela et al. 2004). Uses QC-passing days of the calibration block.
 - **K. Day-to-day dependence:** autocorrelation of NEE **anomalies** (NEE minus the typical NEE for that day of the year) for gaps of 1 to 30 days, on assimilable calibration days. Removing the seasonal cycle first is necessary; otherwise "summer follows summer" looks like day-to-day dependence. Tests the likelihood's assumption that days are independent. The grey band shows the range expected if days were independent.
 
 ### D17. Shared plotting module (Decided, 2026-10-08)
@@ -178,7 +183,7 @@ The figures:
 - The run stops (fail loudly) if: a half-hour appears twice; a day has more than 48 half-hours; a date of the daily file is missing from the half-hourly file; on full days the mean of the half-hours differs from the daily `TA_F` by more than 0.05 C; or the daily mean lies outside the lowest-to-highest range. The mean check proves both files are the same version and the dates are not shifted.
 - `TA_F_DAY` and `TA_F_NIGHT` are no longer used.
 
-**Tested** on made-up data: correct extremes, one incomplete day set to NaN, and every check above raises an error when it should. Still to confirm on the real files.
+**Tested** on made-up data: correct extremes, one incomplete day set to NaN, and every check above raises an error when it should. **Confirmed on the real files (2026-10-12, F10):** every day has all 48 half-hours and every check passed.
 
 ### D19. Model inputs: only what DALEC2 reads (Decided, 2026-10-12)
 
@@ -187,15 +192,18 @@ The figures:
 | Input | Source | Where DALEC2 uses it |
 |---|---|---|
 | Respiration temperature | (highest + lowest) / 2, from the two rows below (D20) | Speed of decomposition and respiration (`exp(Theta * T)`) |
-| Daily highest air temperature | half-hourly `TA_F` (D18) | Photosynthesis (ACM `exp(a8 * Tmax)` term); frost check |
-| Daily lowest air temperature | half-hourly `TA_F` (D18) | Temperature range in canopy conductance (ACM); frost check |
+| Daily highest air temperature | half-hourly `TA_F` (D18) | Photosynthesis (ACM `exp(a8 * Tmax)` term) |
+| Daily lowest air temperature | half-hourly `TA_F` (D18) | Temperature range in canopy conductance (ACM) |
 | Incoming sunlight | `SW_IN_F`, daily file, x 0.0864 to MJ m-2 d-1 | Light supply to photosynthesis (ACM) |
 | Atmospheric CO2 | `CO2_F_MDS`, daily file | Photosynthesis (ACM) |
-| Day of year | from the date, not a column | Leaf-on and leaf-off timing (phenology); day length |
-| Latitude 61.85 N | fixed site constant | Day length |
+| Day of year | from the date, not a column | Day length only (D23) |
+| Day count `t` | from the date: days since the start of the run, day 1 = 1 January 1997 | Leaf-on and leaf-off timing (phenology, D30) |
+| Latitude 61.8474 N | fixed site constant (`site.latitude_deg`) | Day length |
+
+The midpoint temperature is also what the optional frost switch tests (D24); the switch is off in the main model.
 
 **Not inputs, on purpose:**
-- `VPD_F` (air dryness) and `P_F` (precipitation). DALEC2 (Bloom and Williams 2015) has no water cycle; its ACM uses a fixed leaf water potential instead of a weather input. Adding them would mean new equations, so they stay future work. The old repository made the same choice ("No VPD"). Note: `research_plan_v2.md` still lists `VPD_F` and should be corrected.
+- `VPD_F` (air dryness) and `P_F` (precipitation). DALEC2 (Bloom and Williams 2015) has no water cycle; its ACM uses a fixed leaf water potential instead of a weather input. Adding them would mean new equations, so they stay future work. The old repository made the same choice ("No VPD"); this re-assesses and keeps it. Note: `research_plan_v2.md` still lists `VPD_F` and should be corrected (OPEN-6).
 - `TA_F_DAY` and `TA_F_NIGHT`: replaced by true extremes (D18).
 - Daily `TA_F`: read only to check the half-hourly file (D18), never passed to the model (D20).
 - `SW_IN_POT` and soil temperature (`TS_F_MDS_1`): shown in Figures H and I for context only. They sit under `eda.figure_only_columns` in the config, so they cannot be mistaken for model inputs.
@@ -230,53 +238,66 @@ The figures:
 
 **Reference used.** Besides the papers, the official DALEC2 code (CARDAMOM, `DALEC_400`) was read: `DALEC_400.c`, `PARS_INFO_400.c`, `DALEC_ALL/ACM.c`, `DALEC_ALL/offset.c` (github.com/CARDAMOM-framework/CARDAMOM). Its header says it is the code used by Bloom et al. (2016), with Bloom and Williams (2015) as the model description. Where paper and code disagree, the code shows what the authors actually run. Caveat: its prior ranges are the 2016 ones and differ from the 2015 Table 1 (relevant to priors, not structure).
 
-### D21. ACM in the Chuter et al. (2015) form (M1)
+### D21. ACM in the Chuter et al. (2015) form (M1) (Decided)
 Day length from latitude and solar declination, conductance `|psi_d|^a10 / (0.5 Tr + a6 R_tot)`, temperature on `Tmax`. **Why:** `ACM.c` in the official code computes exactly this. The Williams et al. (1997) form has no latitude in its day length and would overstate winter GPP at 62 N. This was an assumption in the previous repository; it is now confirmed.
 
-### D22. ACM coefficients are DALEC2's fixed constants, at full precision (M2)
+### D22. ACM coefficients are DALEC2's fixed constants, at full precision (M2) (Decided)
 `a2 = 0.0156935, a3 = 4.22273, a4 = 208.868, a5 = 0.0453194, a6 = 0.37836, a7 = 7.19298, a8 = 0.011136, a9 = 2.1001, a10 = 0.789798, psi_d = -2.0 MPa, R_tot = 1.0` (`DALEC_400.c`, `constants[]` and `gpppars[]`). **Why:** these are not a site choice; DALEC2 fixes them. They equal the "Loobos" set of Chuter et al. (2015), which the previous repository used in rounded form (for example 0.0156). They were fitted outside the boreal zone; stated limitation.
 
-### D23. Solar day counted from 21 December (`doy + 10`) (M3)
+### D23. Solar day counted from 21 December (`doy + 10`) (M3) (Decided)
 **Why:** the declination in `ACM.c` uses `(yearday + 10)`, matching Chuter et al. Section II.A. Without it the seasonal cycle of day length is 10 days late.
 
-### D24. No frost cut-off in the main model; kept as a switch (M4)
-The previous repository stopped GPP when `(Tmax + Tmin)/2 < -2 C`. **Why not by default:** no such rule exists in the official code, and the cited precedent (Williams et al. 1997, Oregon conifers) has not been verified. Without it the thesis can state that DALEC2 is calibrated as distributed. (Note: the code's `gpppars[8] = -2.0` is the leaf water potential `psi_d`, not a frost threshold.) **Kept as a switch** because winter days carry most of the likelihood weight and DALEC2 lacks cold limitation on photosynthesis (F9, Stettz et al. 2022); it is tested once in the prior predictive check and once as a sensitivity run.
+### D24. No frost cut-off in the main model; kept as a switch (M4) (Decided)
+The previous repository stopped GPP when `(Tmax + Tmin)/2 < -2 C`. **Why not by default:** no such rule exists in the official code, and the cited precedent (Williams et al. 1997, Oregon conifers) has not been verified. Without it the thesis can state that DALEC2 is calibrated as distributed. (Note: the code's `gpppars[8] = -2.0` is the leaf water potential `psi_d`, not a frost threshold.) **Kept as a switch** because winter days carry most of the likelihood weight and DALEC2 lacks cold limitation on photosynthesis (F9, Stettz et al. 2022); it is tested once in the prior predictive check and once as a sensitivity run. **Status:** the prior predictive part is done (reported alongside in F12 to F15, never used to choose, D40); the sensitivity fit is still to do (planned runs list, Part 5). Config: `model.frost_cutoff` (`enabled: false`, threshold -2.0 C on the midpoint temperature).
 
-### D25. A8 corrected: leaf fall anchored on `d_fall` (M5)
+### D25. A8 corrected: leaf fall anchored on `d_fall` (M5) (Decided)
 `Phi_fall` uses `t - d_fall + psi_f`, not the printed `t - cr_fall + psi_f`. **Why:** the official code anchors leaf fall on its "Fday" parameter (`pars[14]`), the leaf-fall day, mirroring how leaf onset is anchored on "Bday". The printed A8 is a typo. This also removes the previous repository's inert `d_fall`.
 
-### D26. All five phenology parameters are fitted, with site-based ranges (M6)
-`d_onset`, `cr_onset`, `d_fall`, `cr_fall`, `c_lf` are sampled. **Why:** RQ1 and RQ3 ask what NEE can constrain; fixing parameters would hide the answer. The ranges are set in step 3 from Scots pine knowledge at Hyytiala, not the 1 to 365 day published range.
+### D26. All five phenology parameters are fitted, with site-based priors (M6) (Decided)
+`d_onset`, `cr_onset`, `d_fall`, `cr_fall`, `c_lf` are sampled. **Why:** RQ1 and RQ3 ask what NEE can constrain; fixing parameters would hide the answer. Their priors were set in step 3 from Scots pine knowledge at Hyytiala (D37, with `c_lf` narrowed in D43), not from the 1 to 365 day published range.
 
-### D27. Starting pools are sampled, with priors centred on site measurements (M7)
+### D27. Starting pools are sampled, with priors centred on site measurements (M7) (Decided)
 All six `C(0)` are parameters with priors from Hyytiala stock measurements (Ilvesniemi et al. 2009; set in step 3). **Why:** the simplest first model (Gelman et al. 2020, Section 2.1). **Fallback:** the previous repository's reparameterisation (sample soil respiration and its split, derive the litter and soil pools) if the sampler struggles with the strong link between a turnover rate and its pool.
 
-### D28. Allocation through a Dirichlet split (M8)
+### D28. Allocation through a Dirichlet split (M8) (Decided)
 `f_auto` plus a Dirichlet split of the remaining `1 - f_auto` across labile, foliage, roots and wood. **Why:** the official code instead splits step by step (foliage share of NPP, then labile share of the rest, then roots, wood taking the remainder). Both forms reach exactly the same set of allocations, so the model is the same; only the way the prior is written differs. The Dirichlet makes site-based priors simple and never produces negative fractions. This also re-frames correction 1 in `MODEL.md`: the paper's footnote is a shorthand of the code's step-by-step split.
 
-### D29. LAI convention moved to the priors (M9)
-It only changes the prior range of `lma`, so it is decided with that prior in step 3.
+### D29. LAI convention moved to the priors (M9) (Decided; closed by D38)
+It only changes the prior range of `lma`, so it is decided with that prior in step 3. **Closed by D38:** the `lma` prior is wide enough to cover both LAI conventions, so no separate choice is needed.
 
-### D30. Phenology uses a continuous day counter (M10)
+### D30. Phenology uses a continuous day counter (M10) (Decided)
 The leaf onset and leaf fall pulses use `t`, the number of days since the start of the run, not the day of year. **Why:** the official code does this (`MET[:,0]`, "projday"). With a 365.25-day cycle, a day-of-year counter that restarts every 1 January causes a small jump each year. Day length (B5) still uses the day of year, as in the code.
 
-### D31. Leaf-fall offset `psi` from the official code's polynomial (A9)
+### D31. Leaf-fall offset `psi` from the official code's polynomial (A9) (Decided)
 `psi` is computed with the sixth-order polynomial in `log(L - 1)`, `L = 1 / c_lf`, from `DALEC_ALL/offset.c`. **How it was settled:** the polynomial matches the equation `2 sqrt(pi) psi = log(1 - c_lf) exp(-psi^2)` within 0.004 for leaf lifespans 1.001 to 8 years; it does not match the previous repository's form (`log(1 - c_lf)` on the other side), which gave an offset about 8 times too large at `c_lf = 0.25` (about 24 days too early or late for a 60-day fall period). The A7 constants 0.6245 and 6.9088 come out of the same polynomial at `L = 1.001`, which confirms the reading. **Why the polynomial, not an exact root:** `c_lf` is now sampled (D26), so `psi` must change smoothly with it for NUTS gradients; the polynomial is differentiable, the root solve is not without extra work, and it is what DALEC2's authors run. Limit: valid for `L` in 1.001 to 8 years only, which covers Scots pine needles (3 to 5 years). **Still to check:** the printed A9 in the PDF, to tell a paper typo from a copying error.
 
-### D32. Parameter scales (Gelman et al. 2020, Section 2.3)
-Each parameter's sampling scale follows from its range by one rule: **log** if upper / lower >= 10, **interval** (logit) if less or if the parameter is a day-of-year position, **simplex** for the allocation split. Result: all five turnover rates, `cr_onset`, `lma`, `ceff` and all six starting pools on the log scale; `f_auto`, the temperature exponent, `d_onset`, `d_fall`, `cr_fall` and `c_lf` on the interval scale; the four allocation shares on the simplex. **Why:** NUTS moves best when every parameter is unbounded and changes on a similar scale; the published ranges span from a factor of 4 to a factor of 10,000. The papers give ranges, not scales, so the scale is a modelling choice; using one rule keeps it simple and explainable. Re-applied to the final ranges after step 3. In PyMC most of this is automatic: a log-normal prior is sampled on the log scale, a bounded prior on the interval scale.
+### D32. Parameter scales (Gelman et al. 2020, Section 2.3) (Decided; final list updated after step 3)
+Each parameter's sampling scale follows from its range by one rule: **log** if upper / lower >= 10, **interval** (logit) if less or if the parameter is a day-of-year position, **simplex** for the allocation split. **Final scales after step 3** (the rule was re-applied to the chosen priors, as planned):
 
-### D33. Prior strategy: smooth, weakly informative priors (Gelman et al. 2020, Section 2; step 3)
+| Scale | Parameters | Prior form |
+|---|---|---|
+| log | `theta_roo`, `theta_woo`, `theta_lit`, `theta_som`, `Theta` (D36), `cr_onset`, `cr_fall` (D37), `lma`, `ceff`, all six starting pools | log-normal |
+| interval (0 to 1) | `f_auto`, `h` (D35), `c_lf` | beta |
+| plain, unbounded | `d_onset`, `d_fall` (D37: their window is far from day 0 and day 365, so no bounds are needed) | normal |
+| simplex | the four allocation shares | Dirichlet |
+
+`theta_min` has no scale of its own: it is computed from `theta_lit` and `h` (D35).
+
+(The first version of this entry, before step 3, put `Theta`, `cr_fall`, `d_onset`, `d_fall` on the interval scale and `theta_min` on the log scale. D35 to D37 changed those.)
+
+**Why:** NUTS moves best when every parameter is unbounded and changes on a similar scale; the published ranges span from a factor of 4 to a factor of 10,000. The papers give ranges, not scales, so the scale is a modelling choice; using one rule keeps it simple and explainable. In PyMC most of this is automatic: a log-normal prior is sampled on the log scale, a bounded prior on the interval scale.
+
+### D33. Prior strategy: smooth, weakly informative priors (Gelman et al. 2020, Section 2; step 3) (Decided)
 Every prior is a smooth distribution on the parameter's scale (D32), centred on a site measurement or literature value and wide enough that the published range stays possible but its extremes are unlikely. No flat priors with hard edges. **Why:** hard edges are walls for NUTS; the previous repository's unusable run had eight parameters pinned at their prior bounds. Smooth priors also state the belief honestly: values near the measurement are likely, extremes possible but rare. **Options not taken:** flat priors on narrowed ranges (the previous repository's approach), and a mix of flat and smooth. **Cost:** each prior needs a stated centre and width with a source; recorded parameter by parameter below.
 
-### D34. Priors, group 1: allocation
+### D34. Priors, group 1: allocation (Decided)
 - `f_auto ~ Beta(25.5, 24.5)`: centre 0.51, sd 0.07, 95% 0.37 to 0.65; under 0.4% outside the published 0.3 to 0.7. **Source:** Hyytiala tree growth 505 of GPP about 1,030 g C m-2 yr-1 (Ilvesniemi et al. 2009, Fig. 6) gives 0.51, site range 0.37 to 0.60; Waring et al. (1998) NPP/GPP 0.47 +/- 0.04 (f_auto 0.53); DeLucia et al. (2007) NPP/GPP 0.23 to 0.83 across forests, lowest in boreal forests (f_auto above 0.5).
 - `(f_lab, f_fol, f_roo, f_woo) = (1 - f_auto) x Dirichlet(13.06, 13.06, 15.26, 44.27)`: shares of growth 0.152, 0.152, 0.178, 0.517 from the measured needle litterfall 154 (split equally between labile and foliage), below-ground litter 90 and wood growth 261 g C m-2 yr-1 (Ilvesniemi et al. 2009, Fig. 6); total concentration 85.65 derived from the measured spread of litterfall and GPP (previous repository, section 11). As shares of GPP: medians 0.073, 0.073, 0.085, 0.251.
 - **Why this informative:** the previous repository's flat split sent too much carbon to the needles and LAI ran away to 48 (site value about 3); Gelman et al. (2020, Section 7.3): "as the model becomes more complex, all of the priors need to become tighter".
 - **Caveats:** the equal labile/foliage split is a judgement (the data constrain only their sum); tower GPP includes the understory but the growth flows are trees only.
 - **Planned check (Gelman et al. 2020, Section 6.3):** after fitting, compare prior and posterior spread; if the posterior of `f_auto` is about as wide as its prior, refit once with sd 0.10 as a sensitivity run.
 
-### D35. Priors, group 2: turnover rates
+### D35. Priors, group 2: turnover rates (Decided)
 All log-normal (log scale, D32). Medians and 95% ranges given as residence times (1 / rate); `theta_lit` and `theta_som` are rates at 0 C.
 
 | Parameter | Median | 95% (residence) | Source |
@@ -291,14 +312,14 @@ All log-normal (log scale, D32). Medians and 95% ranges given as residence times
 **Fallback rule for any parameter with no site or literature source:** centre on the geometric middle of the published range and let the published range be the 95% interval. Used only if no better source is found.
 
 **Way forward for groups 1 and 2 (Gelman et al. 2020):**
-1. **Judge the priors together, not one by one** (Sections 2.4, 7.3: independent priors "may jointly be strongly informative"). The prior predictive check (`scripts/03_prior_predictive.py`) will run DALEC2 with draws from all priors at once. Its pass criteria are written down **before** it is run (annual GPP, ecosystem and soil respiration, NEE, peak LAI, and pool sizes after 14 years), so the check cannot be tuned after seeing it.
-2. **Watch the soil carbon used twice:** in `theta_som` here and in the starting soil pool (D27). The check above shows whether the implied soil respiration is sensible; if not, the previous repository's reparameterisation (D27 fallback) is used.
+1. **Judge the priors together, not one by one** (Sections 2.4, 7.3: independent priors "may jointly be strongly informative"). The prior predictive check (`scripts/03_prior_predictive.py`) runs DALEC2 with draws from all priors at once. Its pass criteria were written down **before** it was run (D40), so the check cannot be tuned after seeing it. **Done:** four rounds, F12 to F15, closed by D45.
+2. **Watch the soil carbon used twice:** in `theta_som` here and in the starting soil pool (D27). The check above shows whether the implied soil respiration is sensible; if not, the previous repository's reparameterisation (D27 fallback) is used. **Result so far:** the soil pool stays steady (median end / start 1.00 to 1.04 in every round). Heterotrophic respiration is higher than the site value (median about 425 to 490 against 290 to 370 g C m-2 yr-1) but inside the Tier-2 band. The fallback is not needed for now; it stays ready in case the sampler struggles with `theta_som` and `c_som_0` (D45, safeguard 2).
 3. **After fitting, measure how much each prior mattered** (Section 6.3): compare prior and posterior spread for every parameter. Parameters whose posterior is about as wide as their prior were not informed by NEE; this is a direct result for RQ1 (expected for the slow `theta_woo` and `theta_som`). Only those get a sensitivity refit with a wider prior.
 
-### D36. Priors, group 3: temperature exponent (confirmed 2026-10-13)
+### D36. Priors, group 3: temperature exponent (Decided, 2026-10-13)
 `Theta ~ LogNormal(median 0.0336, sdlog 0.35)`: 95% 0.017 to 0.067, i.e. Q10 = exp(10 Theta) of 1.18 to 1.95 (median Q10 1.40). 3.7% below and 0.7% above the published 0.018 to 0.08. **Source:** Mahecha et al. (2010): ecosystem respiration across 60 FLUXNET sites converges to Q10 = 1.4 +/- 0.1 against air temperature once seasonal confounding is removed; the previous repository's estimate from Hyytiala winter fluxes was Theta = 0.0366 (Q10 1.44), close to the median. **Why wider than Mahecha's +/- 0.1:** DALEC2's single exponent also absorbs effects the model lacks (soil frost, moisture), so a site-level value may differ from the global one. **Scale changed from interval to log** (D32 allows this after step 3): the prior is now positive-only and smooth without needing the published bounds, which it already respects on 96% of draws.
 
-### D37. Priors, group 4: leaf timing (phenology)
+### D37. Priors, group 4: leaf timing (phenology) (Decided; `c_lf` row replaced by D43)
 In DALEC2 terms at an evergreen pine site, the onset pulse is the **spring flush of new shoots and needles** and the fall pulse is the **autumn drop of the oldest needles**. Note: this is **not** the NEE spring onset of Figure G (median day 100), which is the recovery of photosynthesis in needles that already exist; DALEC2 cannot represent that recovery (F9), and its leaf onset should not be tuned to it.
 
 | Parameter | Prior | 95% | Basis |
@@ -307,15 +328,15 @@ In DALEC2 terms at an evergreen pine site, the onset pulse is the **spring flush
 | `cr_onset` | LogNormal(median 40 d, sdlog 0.35) | 20 to 79 days | length of shoot and needle elongation, roughly May to July; inside the published 10 to 100 |
 | `d_fall` | Normal(265, 15) | day 236 to 294 | day of maximum needle fall (D25: the paper says the offset places the maximum loss rate on `d_fall`); Scots pine needle fall in Finland mostly late August to October. **To confirm** from monthly litterfall data |
 | `cr_fall` | LogNormal(median 60 d, sdlog 0.35) | 30 to 119 days | spread of needle fall over about two months; inside the published 20 to 150 |
-| `c_lf` | Beta(14.51, 39.24) | 0.16 to 0.40 (needle life 2.5 to 6.2 years) | mean needle retention 3.4 to 4.2 years in southern Finland (Pensa and Jalkanen 1999); mean 0.27 (3.7 years). 0.3% below 0.125, the edge of the D31 polynomial |
+| `c_lf` | ~~Beta(14.51, 39.24)~~ **replaced by D43: Beta(43.84, 122.84)** | was 0.16 to 0.40 (needle life 2.5 to 6.2 years); now 0.199 to 0.332 (3.0 to 5.0 years) | mean needle retention 3.4 to 4.2 years in southern Finland (Pensa and Jalkanen 1999). The first version was wider than this source; D43 narrowed it |
 
 Day positions use a plain normal prior (smooth, no bounds needed because the window is far from day 0 and day 365); `cr_fall` moves from interval to log scale (D32 re-applied). Days are counted on the continuous counter (D30), with day 1 = 1 January 1997.
 
-### D38. Priors, group 5: canopy (`lma`, `ceff`), and the LAI convention (closes D29)
+### D38. Priors, group 5: canopy (`lma`, `ceff`), and the LAI convention (closes D29) (Decided; `ceff` replaced by D42)
 - **`lma ~ LogNormal(median 185 g C m-2, sdlog 0.25)`**, 95% 113 to 302. **Basis:** foliage carbon from needle litterfall / `c_lf` = 154 / 0.26, about 590 g C m-2 (Ilvesniemi et al. 2009), divided by site LAI. Kolari (2010) gives all-sided LAI 6.5 to 8; as hemisurface LAI (divide by 2) this is 3.2 to 4.0, giving `lma` about 165; as projected LAI (divide by 2.57) 2.5 to 3.1, giving about 210. **The LAI convention question (M9) is resolved by putting it inside the prior:** the median sits between the two conventions and the 95% range covers both. One run instead of two sensitivity runs, and the uncertainty is stated honestly (Gelman et al. 2020, Section 7.3: uncertainty belongs in the prior). Note: about a third of the prior lies above the official code's upper limit of 200 (from Kattge et al. 2011), but inside the 2015 paper's 400.
-- **`ceff ~ LogNormal(median 16.5, sdlog 0.41)`**, 95% 7.4 to 37. **Basis:** `ceff` replaces `p11 x N` (nitrogen-use efficiency x foliar nitrogen per leaf area). `p11 = 7.4` belongs to the same ACM fit as the fixed coefficients (D22, Chuter et al. 2015, Loobos); with needle N between about 1 and 5 g N m-2 leaf area this gives 7.4 to 37, which also contains the Loobos value 29.6 and most of the previous repository's REFLEX range 5 to 20. **To check:** a Hyytiala needle N per area value would narrow this.
+- **Replaced by D42 (round 2): the prior now used is `ceff ~ LogNormal(median 10, sdlog 0.354)`, 95% 5 to 20.** The first version, kept for the record: **`ceff ~ LogNormal(median 16.5, sdlog 0.41)`**, 95% 7.4 to 37. **Basis:** `ceff` replaces `p11 x N` (nitrogen-use efficiency x foliar nitrogen per leaf area). `p11 = 7.4` belongs to the same ACM fit as the fixed coefficients (D22, Chuter et al. 2015, Loobos); with needle N between about 1 and 5 g N m-2 leaf area this gives 7.4 to 37, which also contains the Loobos value 29.6 and most of the previous repository's REFLEX range 5 to 20. (The "to check: Hyytiala needle N" note no longer sets the prior after D42; it is kept only for the discussion of what `ceff` means, D42 "honest tension".)
 
-### D39. Priors, group 6: starting pools on 1 January 1997 (implements D27)
+### D39. Priors, group 6: starting pools on 1 January 1997 (implements D27) (Decided)
 All log-normal, centred on Hyytiala measurements (Ilvesniemi et al. 2009, Fig. 6 and Table 4).
 
 | Pool | Median | sdlog | 95% | Basis |
@@ -329,10 +350,14 @@ All log-normal, centred on Hyytiala measurements (Ilvesniemi et al. 2009, Fig. 6
 
 **Caveats:** the measurements are from the 2000s while the run starts in 1997 (the stand was younger, and a thinning followed in 2002); the widths are set to absorb this. The litter pool rests on a steady-state argument and is the least certain, hence its wider prior. The soil measurement also informs `theta_som` (D35); the prior predictive check tests whether the implied soil respiration is sensible.
 
-### Summary of step 3
-24 sampled quantities: `f_auto`, the 4-share Dirichlet (3 free), 4 turnover rates, `h`, `Theta`, 5 phenology, `lma`, `ceff`, 6 starting pools. Every prior is smooth (D33) and has a stated source or reason; three values are marked **to confirm** (phenology timing, needle fall timing, needle N). Next: judge them together in the prior predictive check (D35, way forward 1).
+### Summary of step 3 (closed by D45)
+24 sampled quantities: `f_auto`, the 4-share Dirichlet (3 free, because the shares add up to 1), 4 turnover rates, `h`, `Theta`, 5 phenology, `lma`, `ceff`, 6 starting pools. That is 23 free dimensions for the sampler; `theta_min` is computed, not sampled. Every prior is smooth (D33) and has a stated source or reason.
 
-### D40. Prior predictive check: pass criteria, written before running (Gelman et al. 2020, Section 2.4)
+**Priors used for fitting:** D34 to D39, with `ceff` from D42 and `c_lf` from D43, plus the soft foliage constraint D44. All in one list, `PRIORS` in `src/dalec/priors.py` (D41).
+
+**Still marked to confirm:** leaf onset timing and needle fall timing (D37). Needle N no longer sets a prior (D42). These are listed in OPEN-6.
+
+### D40. Prior predictive check: pass criteria, written before running (Gelman et al. 2020, Section 2.4) (Decided)
 **Set-up.** 1,000 draws from all priors (D34 to D39) at once; each draw runs DALEC2 over the full calibration block (1997 to 2010, 5,113 days) with the real drivers; frost switch off (main) and once on (D24). No NEE observations are used: the check asks whether the priors describe a **believable boreal pine forest**, not whether they fit the tower data. The observed NEE climatology may be shown in a figure for context only; nothing is tuned to it.
 
 **Tier 1: physically impossible.** A draw fails if any of these happens on any day:
@@ -358,14 +383,14 @@ All log-normal, centred on Hyytiala measurements (Ilvesniemi et al. 2009, Fig. 6
 
 **If the check fails:** find which priors drive the failures (compare the parameter values of failing and passing draws), change only those, and only with a stated source or reason; record every change here and re-run. The frost-switch run is reported alongside, not used to pick between them.
 
-### D41. Implementation of the priors and the prior predictive check (2026-10-13)
+### D41. Implementation of the priors and the prior predictive check (Decided, 2026-10-13)
 - **One list of priors** (`src/dalec/priors.py`, `PRIORS`), used by the prior predictive check now and by the PyMC model later, so they cannot disagree.
-- **`c_lf` draws outside the polynomial's range** (needles living longer than 8 years, about 0.3% of the prior) are drawn again from the same prior. This trims a tiny tail; D31's polynomial is not valid there.
+- **`c_lf` draws outside the polynomial's range** (needles living longer than 8 years, about 0.3% of the prior) are drawn again from the same prior. This trims a tiny tail; D31's polynomial is not valid there. (With D43's narrower prior this almost never happens, but the rule stays as a guard.)
 - **Prior predictive settings** in the config (`prior_predictive`): 1,000 draws, fixed seed 20261013, run in batches of 250.
 - **Diagnosis when a target is missed:** for every sampled quantity, the standardised difference between failing and passing draws on the prior's own scale (log, logit or plain); the largest ones point to the priors to revisit (D40, "if the check fails").
 - **The loader for model runs** (`load_record_with_drivers`, `load_model_block`) moved into `data_io.py`, shared by scripts 02 and 03.
 
-### D42. Prior predictive round 2: `ceff` prior (DECIDED 2026-10-13, after the re-run, F13)
+### D42. Prior predictive round 2: `ceff` prior (Decided, 2026-10-13, after the re-run, F13)
 Following F12 and D40 ("change only the priors linked to failure, with a stated source"), only `ceff` changes in this round.
 - **New:** `ceff ~ LogNormal(median 10, sdlog 0.354)`, 95% 5 to 20. **Source:** the REFLEX DALEC model-data fusion experiment used a prior of 5 to 20 for the same ACM parameter ("nitrogen use efficiency parameter (a1) in ACM", Fox et al. 2009, Table 3; the previous repository cited it as Table 4). REFLEX includes an evergreen forest site.
 - **Replaces** D38's `LogNormal(16.5, 0.41)` (95% 7.4 to 37), which was built from `p11 x N` with an assumed needle N of 1 to 5 g N m-2.
@@ -373,13 +398,13 @@ Following F12 and D40 ("change only the priors linked to failure, with a stated 
 - **Gelman et al. (2020, Section 2.4)** allow priors to be revised after a prior predictive check, because no observations enter it; the revision must rest on outside knowledge (here a published prior), and both rounds are reported.
 - **Options not taken:** (B) setting `ceff` so that the implied annual GPP matches the site's plausible range (prior elicitation on an observable, also Section 2.4; rejected for now because the site GPP comes partly from the same tower); (C) keeping D38 and accepting the failure.
 
-### D43. Prior predictive round 3: `c_lf` prior narrowed to its source (DECIDED 2026-10-13, after the re-run, F14)
+### D43. Prior predictive round 3: `c_lf` prior narrowed to its source (Decided, 2026-10-13, after the re-run, F14)
 - **New:** `c_lf ~ Beta(43.84, 122.84)`: mean 0.263, 95% 0.199 to 0.332, i.e. needle lifespan **3.0 to 5.0 years**.
 - **Replaces** D37's `Beta(14.51, 39.24)` (lifespan 2.5 to 6.2 years).
 - **Why:** `c_lf` is the only prior linked to both failure modes (F13). D37's prior was **wider than its own source**: Pensa and Jalkanen (1999) report mean needle retention of 3.4 to 4.2 years in southern Finland; 3 to 5 years covers that with a margin (the previous repository used the same 3 to 5 years). Narrowing a prior to what its source supports is outside knowledge, not tuning to the check (D40, Gelman et al. 2020, Section 2.4).
 - **Not changed in this round:** `lma` (linked to Tier 1, but its width reflects the unresolved LAI convention, D38); kept for round 4 if needed.
 
-### D44. Soft steady-state constraint on the foliage pool (DECIDED 2026-10-13, after the re-run, F15)
+### D44. Soft steady-state constraint on the foliage pool (Decided, 2026-10-13, after the re-run, F15)
 **What.** The joint prior gets one extra smooth term: `log p += -0.5 (log Rs / log 2)^2`, where for the foliage pool `Rs = (total inputs / total outputs over the run) x (mean pool on each 1 January) / (pool at the start)`. A foliage pool in balance has `Rs = 1` and no penalty; a pool running away (`Rs` above 1) or collapsing (below 1) is made less likely, smoothly. Code: `steady_state_ratio` and `edc_log_weight` in `priors.py`.
 
 **Source: the official DALEC2 code.** `DALEC_400/EDC2_400.c` implements "EDCs 7-12" exactly this way for every pool, with equilibrium factor `EQF = 2` by default: it rejects a draw when `|log Rs| > log(EQF)` and also stores the Gaussian version `-0.5 (log Rs / log EQF)^2` ("EDCPROB"). The growth-rate and decay-rate rules described as EDC 7 and EDC 8 in Bloom and Williams (2015) are commented out in that code version and replaced by this steady-state form. Where paper and code differ we follow the code (as in D21 to D31).
@@ -393,7 +418,7 @@ Following F12 and D40 ("change only the priors linked to failure, with a stated 
 
 **Honest caveat.** The constraint and the Tier-2 "foliage end/start" check measure related things, so part of the improvement is expected by construction. The justification for adding it is the official code, not the check.
 
-### D45. Step 3 closed: the joint prior is D34 to D44; the narrow Tier 1 miss is accepted (2026-10-13)
+### D45. Step 3 closed: the joint prior is D34 to D44; the narrow Tier 1 miss is accepted (Decided, 2026-10-13)
 **Decision.** Stop revising priors. The prior used for fitting is the independent priors D34 to D43 plus the soft foliage constraint D44.
 **Why stop here.** Four rounds took impossible draws from 84% (previous repository) and 34.7% (round 1) to 6.4%, and Tier 2 now passes. The remaining 6.4% are mostly days with GPP above 20 g C m-2 d-1; such draws imply daily NEE far beyond anything observed (summer observations about -2 to -4), so the likelihood rules them out directly. Further narrowing has small returns and would push priors past what their sources support (Gelman et al. 2020, Section 7.3: priors should encode knowledge, not be tuned until a check passes).
 **The miss is reported, not hidden:** D40's 5% target is kept as written; the thesis states 6.4% against 5%, with this reasoning.
@@ -401,6 +426,15 @@ Following F12 and D40 ("change only the priors linked to failure, with a stated 
 1. Start every NUTS chain from a prior draw that passes Tier 1, so no chain begins in a broken region.
 2. Watch divergences and chains stuck at extreme GPP or LAI; if they appear, revisit `lma` (strongest remaining Tier 1 link after `ceff`) or extend D44 to the labile pool.
 3. The frost switch stays a sensitivity run (D24), not a fix chosen by this check.
+
+### D46. The PyTensor model for NUTS (`src/dalec/model.py`) (Decided, 2026-10-13)
+- **Same model as `model_numpy.py`, verified:** daily NEE, GPP, end pools and the D44 ratio agree to a relative 1e-10 for three parameter sets and with the frost switch (`tests/test_model.py`).
+- **Gradients verified:** for 7 parameters spread over the groups (`ceff`, `lma`, `temperature_exponent`, `theta_som`, `c_lf`, `d_fall`, `c_som_0`), PyTensor's gradient of total NEE equals a finite-difference slope of the numpy model within 0.01%.
+- **Organisation for speed:** weather-only terms are computed once in numpy; leaf timing and the temperature multiplier for all days at once outside the loop; only photosynthesis and the pool updates run inside `pytensor.scan`, with parameters passed as explicit `non_sequences` (the previous repository measured a 12x slower gradient through closures).
+- **Measured cost (cloud test machine, 14 years of synthetic weather):** about 40 ms for one value plus gradient of all 24 parameters, after a one-off compile of about 35 s. A NUTS draw needs roughly 50 to 250 such evaluations.
+- **Leaf timing uses the D31 polynomial** written as a PyTensor expression, so `c_lf` stays differentiable (D26).
+- **Tests:** 49 in total (`pytest`): ACM 14, numpy model 14, priors 10, PyTensor model 11 (the last group takes about 2 minutes because each case compiles the model).
+- **Not yet built:** the PyMC model that joins the priors, the D44 constraint and the likelihood (L1), and the fake-data check (Gelman et al. 2020, Section 4.1). These are the next step.
 
 ---
 
@@ -438,7 +472,7 @@ Not chosen:
 - A constant sigma (option B): ignores that sigma grows with flux size (R^2 about 0.47 in the previous analysis).
 - sigma = k * RANDUNC: rescales every day equally, so the relative weights between days stay the same (the reason Gelman et al. give for rejecting the beta-binomial).
 
-Implementation: the observation model is a config setting (`randunc_only` now; `randunc_plus_model_error` for the sensitivity run), so switching needs no code change.
+Implementation (planned): the observation model will be a config setting (`randunc_only` for the main fit; `randunc_plus_model_error` for the sensitivity run), so switching needs no code change. It is not in `config/default.yaml` yet; it is added together with the PyMC model.
 
 ### L2. Error distribution (Decided for now, stated limitation)
 
@@ -465,15 +499,17 @@ Implementation: the observation model is a config setting (`randunc_only` now; `
 
 **F4. Verification against the previous repository.** The new code reproduces its counts exactly: 4,413 of 5,113 calibration days (86.3%) and 810 of 1,461 evaluation days (55.4%).
 
-**F5. Missing RANDUNC.** 1,138 of 6,940 days (16.4%) in the full file have no RANDUNC, including all of 2014. Within the calibration block, 365 days lack it, spread over several gaps (to be shown in Figure A), not one whole year.
+**F5. Missing RANDUNC.** 1,138 of 6,940 days (16.4%) in the full file have no RANDUNC, including all of 2014. Within the calibration block, 365 days lack it, spread over several gaps (shown in Figure A, which also prints every gap of 7 days or more), not one whole year.
+
+**F6. Evaluation block.** 608 of 1,461 evaluation days (41.6%) are excluded only because RANDUNC is missing: all of 2014 and the first half of 2011.
 
 **F7. Daily temperature extremes are not in the daily file (resolved by D18).** DALEC2's photosynthesis (ACM) uses the daily temperature range, but the FLUXNET daily file has no daily maximum or minimum. `TA_F_DAY` and `TA_F_NIGHT` are only stand-ins; the previous repository found they understate the range by about 4.8 C and derived true extremes from the half-hourly file. This is the one model input the daily file cannot supply directly.
+
+**F8. Driver completeness.** In the full record, the model drivers are complete except CO2 (0.3% empty: the 19 days at the start of 1996, the reason 1996 is excluded, D4). Inside the calibration block every model input is complete (F10). Soil temperature and soil water are 1 to 5% empty; net radiation 21%, diffuse shortwave 46%, soil heat flux 46%, diffuse photosynthetic light 77%.
 
 **F9. Temperature-related cautions from earlier DALEC users (literature, 2026-10-12).**
 - Bloom and Williams (2015) chose test sites "with a ≤ 3 months of recorded below-freezing soil temperatures" and little water stress, because "these criteria reflect the current capabilities of DALEC2". FI-Hyy, a boreal site, has a longer frozen season (the previous repository's notes say about four to six months of soil frost; to be confirmed from the soil temperature data). Using DALEC2 here is a deliberate scope choice and a stated limitation.
 - Stettz et al. (2022), DALEC2 at a subalpine evergreen forest (US-NR1), report that baseline DALEC2 has no cold-temperature control on spring photosynthesis: GPP is "limited primarily by incoming shortwave radiation". They added a scalar on daily minimum temperature (GPP gradually reduced below about 6.0 C, fully stopped below about -7.1 C), which improved spring GPP (r = 0.88 vs 0.47). This matches the early spring onset found in the previous repository and supports showing spring in Figure I.
-
-**F8. Driver completeness.** In the full record, the model drivers are complete except CO2 (0.3% empty, expected to be the 19 days at the start of 1996). Soil temperature and soil water are 1 to 5% empty; net radiation 21%, diffuse shortwave 46%, soil heat flux 46%, diffuse photosynthetic light 77%.
 
 **F10. First real-data run of the driver figures (2026-10-12).**
 - The half-hourly safety check (D18) passed: every day has 48 valid half-hours, and the half-hourly mean matches the daily `TA_F` within 0.05 C on every day.
@@ -489,7 +525,7 @@ Implementation: the observation model is a config setting (`randunc_only` now; `
 - **Plausible draws, medians:** GPP 1,560 (site about 1,030), Rh 488 (site 290 to 370), NEE -248, peak LAI 3.7 (site about 2.5 to 4), foliage end/start 0.83, wood 1.49, soil 1.04.
 - **Frost switch on (D24):** Tier 1 29.5%, Tier 2 37.8%; better, still failing.
 - **NEE seasonal cycle (Figure L, observed for context only):** winter and autumn match the observed cycle closely; summer observed values sit inside the middle half; **in spring nearly all prior draws turn to net uptake by early March, about six weeks before the observed cycle (mid-April)**. Because this appears across the whole prior, it is structural (no cold limit on photosynthesis; F9, Stettz et al. 2022), not something a prior can fix.
-- **Next (D40, "if the check fails"):** revisit only the canopy priors (`ceff` first, then `lma`, `c_lf`, allocation to leaves), each with a stated source.
+- **Next (D40, "if the check fails"):** revisit only the canopy priors (`ceff` first, then `lma`, `c_lf`, allocation to leaves), each with a stated source. **Done:** `ceff` in D42, `c_lf` in D43, then the soft constraint D44; `lma` and the allocation priors were left unchanged (D45).
 
 **F13. Prior predictive check, round 2 (only `ceff` changed, D42; real data, 2026-10-13).**
 - **Tier 1:** 9.3% impossible (round 1: 34.7%; target at most 5%), still FAIL. Daily GPP above 20: 7.7%; LAI above 12: 6.2%; annual GPP above 3,000: 3.2%.
@@ -511,7 +547,7 @@ Implementation: the observation model is a config setting (`randunc_only` now; `
 - With the frost switch on: Tier 1 5.8%, Tier 2 46.0%.
 - Medians: Rh 433, NEE -93, peak LAI 3.4, foliage 0.63, wood 1.31, soil 1.00.
 - Links: Tier 1 still the canopy group (`ceff` +1.15, `lma` -1.11, `f_auto` -0.81, `f_lab` +0.78, `f_fol` +0.68, `c_lf` -0.67); Tier 2 links all below 0.3 (`c_lf` +0.29), i.e. no single prior stands out any more.
-- **Reading:** both targets are now narrowly missed, and narrowing single priors has reached diminishing returns (Tier 1: 34.7, 9.3, 8.6). The remaining failures are canopy runaway and collapse, which is exactly what Bloom and Williams (2015) remove with their ecological dynamic constraints EDC 7 (no pool grows faster than 10% per year) and EDC 8 (no pool decays with a half-life under 3 years). This project dropped EDCs because hard accept/reject rules break NUTS (carried-over decision).
+- **Reading:** both targets are now narrowly missed, and narrowing single priors has reached diminishing returns (Tier 1: 34.7, 9.3, 8.6). The remaining failures are canopy runaway and collapse, which is exactly what Bloom and Williams (2015) remove with their ecological dynamic constraints EDC 7 (no pool grows faster than 10% per year) and EDC 8 (no pool decays with a half-life under 3 years). This project dropped EDCs because hard accept/reject rules break NUTS (carried-over decision). **What followed:** the official code turned out to use a different, steady-state form, and its smooth version was added for the foliage pool (D44, F15).
 
 **F15. Prior predictive check with the soft foliage constraint (D44; real data, 2026-10-13).** Same 1,000 draws as round 3, re-weighted by the constraint (effective number of draws 808; 1.0% of draws get almost no weight).
 | | Round 3 (independent priors) | **With D44** | Target |
@@ -525,27 +561,54 @@ Implementation: the observation model is a config setting (`randunc_only` now; `
 - With the frost switch on as well: Tier 1 4.8%, Tier 2 64.7% (both pass); reported alongside only (D24, D40), not used to choose.
 - Part of the foliage improvement is expected by construction (D44 caveat); GPP and LAI checks improved too, which the constraint does not target directly.
 
-**F6. Evaluation block.** 608 of 1,461 evaluation days (41.6%) are excluded only because RANDUNC is missing: all of 2014 and the first half of 2011.
-
 ---
 
 ## Part 5. Open items
+
+### Still open
 
 **OPEN-1. Evaluation mask.** Evaluation needs sigma only for probability-based checks (for example, predictive interval coverage). Error measures like RMSE need only NEE and QC. Using QC alone keeps 1,418 instead of 810 evaluation days (adds 2014 and early 2011). Decide when designing the evaluation chapter.
 
 **OPEN-3. Spring onset number.** The previous EDA found a median observed onset of day 96 (range 58 to 117) with the 10-day rule, while project notes mention an observed onset of day 110 in the model comparison. The new code gives a median of day 100 (range 66 to 137) for 1997-2010 (F10), so three numbers now exist. These probably come from different definitions or data. Pick one definition (D16 uses the 10-day rule) and use it consistently in the thesis.
 
-**OPEN-4. Daily temperature extremes (F7).** Closed 2026-10-12: derived from the half-hourly file (D18).
+**OPEN-6. Small checks still to do** (none blocks the next step):
+- D31: read the printed equation A9 in the Bloom and Williams (2015) PDF, to tell a paper typo from a copying error in the previous repository.
+- D37: confirm the leaf onset timing (Schiestl-Aalto et al. 2013 or Schiestl-Aalto 2017) and the needle fall timing (monthly litterfall data).
+- F9: confirm the length of the frozen-soil season at Hyytiala from the soil temperature data (the previous notes say about four to six months).
+- D19: correct `research_plan_v2.md`, which still lists `VPD_F` as a driver.
+- D2: add PyMC, PyTensor and pytest to `environment.yml`; freeze `environment.lock.yml` before producing thesis results.
+- D44: raise with the supervisor that "no EDCs" became "a soft EDC on the foliage pool".
+- References marked "check" below: verify against the original papers.
 
-**OPEN-5. Model structure.** Closed 2026-10-13: M1 to M8 and M10 decided (D21 to D28, D30); M9 moved to the priors (D29).
+**OPEN-7. Choice of sampler.** NUTS as the only sampler is carried over from the previous repository and not yet re-assessed. Review it when fitting starts (Gelman et al. 2020, Section 3), using the D45 safeguards.
 
-### Carried over from the previous repository, not yet re-assessed
+### Planned sensitivity runs (decided in principle, to run after the main fit)
 
-These will be reviewed when the work reaches them (allocation, ACM form, LAI convention and `d_fall` were re-assessed on 2026-10-13: D21, D25, D28, D29):
+| Run | What changes | Entry |
+|---|---|---|
+| Frost switch | GPP stopped when the midpoint temperature is below -2 C | D24 |
+| Model error added to sigma | sigma_t = sqrt(RANDUNC_t^2 + sigma_m^2), sigma_m estimated | L1 |
+| Wider `f_auto` prior | sd 0.10 instead of 0.07, only if the posterior is about as wide as the prior | D34 |
+| Wider priors where NEE gave no information | only for parameters whose posterior is about as wide as the prior | D35, way forward 3 |
+| Day-to-day correlated errors | for example AR(1) errors, if time allows | F11 |
 
-- No hard EDC constraints (they break differentiability for NUTS); a soft, smooth version on the foliage pool is proposed in D44.
-- No VPD driver.
-- NUTS as the only sampler.
+### Closed
+
+**OPEN-2. Which days each sigma figure uses.** Closed 2026-10-08 (D15).
+
+**OPEN-4. Daily temperature extremes (F7).** Closed 2026-10-12: derived from the half-hourly file (D18), confirmed on the real files (F10).
+
+**OPEN-5. Model structure.** Closed 2026-10-13: M1 to M8 and M10 decided (D21 to D28, D30); M9 moved to the priors (D29) and closed there by D38.
+
+### Carried over from the previous repository
+
+Re-assessed (2026-10-12 and 2026-10-13):
+- Allocation (D28), ACM form (D21), LAI convention (D29, D38), `d_fall` (D25): changed or confirmed.
+- No VPD driver: kept, with the literature check in D19.
+- No EDC constraints: hard accept/reject rules are still excluded (they break NUTS), but a smooth steady-state version on the foliage pool was added (D44).
+
+Not yet re-assessed:
+- NUTS as the only sampler (OPEN-7).
 
 ---
 
@@ -554,10 +617,10 @@ These will be reviewed when the work reaches them (allocation, ACM form, LAI con
 - Bacour, C. et al. (2023). Assimilation of multiple datasets results in large differences in regional- to global-scale NEE and GPP budgets simulated by a terrestrial biosphere model. Biogeosciences 20, 1089-1111.
 - Bloom, A. A. and Williams, M. (2015). Constraining ecosystem carbon dynamics in a data-limited world: integrating ecological "common sense" in a model-data fusion framework. Biogeosciences 12, 1299-1315.
 - Bloom, A. A., Exbrayat, J.-F., van der Velde, I. R., Feng, L. and Williams, M. (2016). The decadal state of the terrestrial carbon cycle: global retrievals of terrestrial carbon allocation, pools, and residence times. PNAS 113(5), 1285-1290. (Version of DALEC2 in the CARDAMOM code `DALEC_400`.)
-- CARDAMOM framework, source code. github.com/CARDAMOM-framework/CARDAMOM, files `C/projects/CARDAMOM_MODELS/DALEC/DALEC_400/DALEC_400.c`, `PARS_INFO_400.c`, `DALEC_ALL/ACM.c`, `DALEC_ALL/offset.c` (read 2026-10-13).
 - Brunner, I. et al. (2013). Fine-root turnover rates of European forests revisited: an analysis of data from sequential coring and ingrowth cores. Plant and Soil 362, 357-372.
-- Coleman, K., Prout, J. M. and Milne, A. E. (2024). RothC: a model for the turnover of carbon in soil. Model description. Rothamsted Research.
+- CARDAMOM framework, source code. github.com/CARDAMOM-framework/CARDAMOM, files `C/projects/CARDAMOM_MODELS/DALEC/DALEC_400/DALEC_400.c`, `PARS_INFO_400.c`, `DALEC_ALL/ACM.c`, `DALEC_ALL/offset.c` (read 2026-10-13).
 - Chuter, A. M., Aston, P. J., Skeldon, A. C. and Roulstone, I. (2015). A dynamical systems analysis of the data assimilation linked ecosystem carbon (DALEC) models. Chaos 25(3), 036401. (Journal details from the previous repository; the quote in D20 was read from the manuscript at personalpages.surrey.ac.uk/a.skeldon/DALEC_paper.pdf, dated 8 December 2014. Check against the published article.)
+- Coleman, K., Prout, J. M. and Milne, A. E. (2024). RothC: a model for the turnover of carbon in soil. Model description. Rothamsted Research.
 - Delahaies, S., Roulstone, I. and Nichols, N. (2017). Constraining DALEC v2 using multiple data streams and ecological constraints: analysis and application. Geoscientific Model Development 10, 2635-2650.
 - DeLucia, E. H., Drake, J. E., Thomas, R. B. and Gonzalez-Meler, M. (2007). Forest carbon use efficiency: is respiration a constant fraction of gross primary production? Global Change Biology 13, 1157-1167.
 - Douglas, et al. (2026). Regularisation of the 4DEnVar data assimilation method for calibration of land surface models. EGUsphere preprint.
@@ -565,24 +628,28 @@ These will be reviewed when the work reaches them (allocation, ACM form, LAI con
 - Fang, et al. Differentiable land model reveals global environmental controls on ecological parameters. arXiv:2411.09654.
 - Fer, I. et al. (2018). Linking big models to big data: efficient ecosystem model calibration through Bayesian model emulation. Biogeosciences 15, 5801.
 - Fox, A. et al. (2009). The REFLEX project: comparing different algorithms and implementations for the inversion of a terrestrial ecosystem model against eddy covariance data. Agricultural and Forest Meteorology 149, 1597-1615.
-- Gelman, A. et al. (2020). Bayesian Workflow. arXiv:2011.01808 (Section 10.5, pp. 53-54; Section 7.1).
+- Gelman, A. et al. (2020). Bayesian Workflow. arXiv:2011.01808. (Sections used: 2.1 to 2.5, 4.1, 6.3, 7.1, 7.3, 10.5.)
 - Hollinger, D. Y. and Richardson, A. D. (2005). Uncertainty in eddy covariance measurements and its application to physiological models. Tree Physiology 25.
+- Ilvesniemi, H. et al. (2009). Long-term measurements of the carbon balance of a boreal Scots pine dominated forest ecosystem. Boreal Environment Research 14(4), 731-753. (Site carbon stocks and flows, Fig. 6 and Table 4; used for most priors.)
 - Kattge, J. et al. (2011). TRY: a global database of plant traits. Global Change Biology 17, 2905-2935. (Cited in the official code for the lma range.)
 - Kolari, P. (2010). Dissertationes Forestales 99, doi:10.14214/df.99.
 - Kuppel, S. et al. (2012). Constraining a global ecosystem model with multi-site eddy-covariance data. Biogeosciences 9, 3757-3776.
 - Mahecha, M. D. et al. (2010). Global convergence in the temperature sensitivity of respiration at ecosystem level. Science 329, 838-840.
-- Pensa, M. and Jalkanen, R. (1999). Needle chronologies on Pinus sylvestris in northern Estonia and southern Finland. Silva Fennica 33(3), 171-177. doi:10.14214/sf.654 (pages to check)
+- Makela, A. et al. (2004). Acclimation of photosynthetic capacity in Scots pine to the annual cycle of temperature. Tree Physiology 24, 369-376. (Details to check.)
 - Pastorello, G. et al. (2020). The FLUXNET2015 dataset and the ONEFlux processing pipeline for eddy covariance data. Scientific Data 7, 225.
-- Pu, et al. (2025). MCI GPP. Scientific Data.
+- Pensa, M. and Jalkanen, R. (1999). Needle chronologies on Pinus sylvestris in northern Estonia and southern Finland. Silva Fennica 33(3), 171-177. doi:10.14214/sf.654 (pages to check)
 - Pinnington, E. M. et al. (2016). Investigating the role of prior and observation error correlations in improving a model forecast of forest carbon balance using Four-dimensional Variational data assimilation. Agricultural and Forest Meteorology 228-229, 299-314.
+- Pu, et al. (2025). MCI GPP. Scientific Data.
 - Richardson, A. D. et al. (2010). Estimating parameters of a forest ecosystem C model with measurements of stocks and fluxes as joint constraints. Oecologia 164, 25-40.
-- Smallman, T. L. and Williams, M. (2019). Description and validation of an intermediate complexity model for ecosystem photosynthesis and evapotranspiration: ACM-GPP-ETv1. Geoscientific Model Development 12, 2227-2253.
-- Schiestl-Aalto, P. et al. (2013). Duration of shoot elongation in Scots pine varies within the crown and between years. Annals of Botany. doi:10.1093/aob/mct180 (title and year to check)
 - Schiestl-Aalto, P. (2017). Modelling intra- and inter-annual growth dynamics of Scots pine in the whole-tree carbon balance framework. Dissertationes Forestales 234.
+- Schiestl-Aalto, P. et al. (2013). Duration of shoot elongation in Scots pine varies within the crown and between years. Annals of Botany. doi:10.1093/aob/mct180 (title and year to check)
+- Smallman, T. L. and Williams, M. (2019). Description and validation of an intermediate complexity model for ecosystem photosynthesis and evapotranspiration: ACM-GPP-ETv1. Geoscientific Model Development 12, 2227-2253.
 - Stettz, S. G. et al. (2022). Resolving temperature limitation on spring productivity in an evergreen conifer forest using a model-data fusion framework. Biogeosciences 19, 541-558.
+- Suni, T. et al. (2003). Air temperature triggers the recovery of evergreen boreal forest photosynthesis in spring. Global Change Biology 9, 1410-1426. (Details to check.)
+- Tramontana, G. et al. (2016). Predicting carbon dioxide and energy fluxes across global FLUXNET sites with regression algorithms. Biogeosciences 13, 4291.
 - Tuomi, M. et al. (2009). Leaf litter decomposition: estimates of global variability based on Yasso07 model. Ecological Modelling 220, 3362-3371. (Cited via the previous repository; check.)
 - Waring, R. H., Landsberg, J. J. and Williams, M. (1998). Net primary production of forests: a constant fraction of gross primary production? Tree Physiology 18, 129-134.
-- Tramontana, G. et al. (2016). Predicting carbon dioxide and energy fluxes across global FLUXNET sites with regression algorithms. Biogeosciences 13, 4291.
+- Williams, M. et al. (1997). Predicting gross primary productivity in terrestrial ecosystems. Ecological Applications 7(3), 882-894. (Cited for the frost rule, D24; the rule itself not yet found in it.)
 - Williams, M. et al. (2009). Improving land surface models with FLUXNET data. Biogeosciences 6, 1341-1359.
 - Yuan, Q. et al. (2025). Global carbon flux dataset generated by fusing remote sensing and multiple flux networks observation. Scientific Data.
 

@@ -10,5 +10,7 @@ dependencies:
   - matplotlib
   - pyyaml
   - pip
+  - pymc        # new: the sampler and model library (D46)
+  - pytest      # new: runs the tests in tests/
   - pip:
     - -e .
