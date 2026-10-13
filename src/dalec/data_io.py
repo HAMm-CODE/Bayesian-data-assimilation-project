@@ -276,6 +276,57 @@ def attach_temperature_extremes(
     return out
 
 
+def load_record_with_drivers(config: dict[str, Any] | None = None) -> pd.DataFrame:
+    """Every day in the file, with the model drivers, the daily highest, lowest and
+    midpoint temperature from the half-hourly file (D18, D20), and the likelihood masks.
+    """
+    if config is None:
+        config = load_config()
+    cols = config["columns"]
+    drv = config["drivers"]
+    ext = drv["temperature_extremes"]
+    missing = float(config["data"]["missing_value"])
+    data = load_fluxnet_dd(
+        resolve_path(config["paths"]["fluxnet_dd"]),
+        timestamp_column=cols["timestamp"],
+        required_columns=[cols["nee"], cols["sigma"], cols["qc"], *drv["model"].values(),
+                          ext["daily_check_column"]],
+        missing_value=missing,
+    )
+    extremes = daily_temperature_extremes(
+        resolve_path(config["paths"]["fluxnet_hh"]),
+        timestamp_column=ext["hh_timestamp"],
+        temperature_column=ext["hh_column"],
+        half_hours_per_day=int(ext["half_hours_per_day"]),
+        missing_value=missing,
+    )
+    data = attach_temperature_extremes(
+        data,
+        extremes,
+        mean_column=ext["daily_check_column"],
+        t_max_name=ext["t_max"],
+        t_min_name=ext["t_min"],
+        t_mid_name=ext["t_mid"],
+        half_hours_per_day=int(ext["half_hours_per_day"]),
+        mean_tolerance=float(ext["mean_tolerance"]),
+    )
+    return add_masks(
+        data,
+        nee_column=cols["nee"],
+        sigma_column=cols["sigma"],
+        qc_column=cols["qc"],
+        qc_threshold=float(config["data"]["qc_threshold"]),
+    )
+
+
+def load_model_block(config: dict[str, Any] | None = None, *, block: str = "calibration") -> pd.DataFrame:
+    """One year block with everything the model and the likelihood need."""
+    if config is None:
+        config = load_config()
+    start, end = year_block(config, block)
+    return select_years(load_record_with_drivers(config), start, end)
+
+
 def load_screened_block(
     config: dict[str, Any] | None = None, *, block: str = "calibration"
 ) -> pd.DataFrame:

@@ -358,6 +358,21 @@ All log-normal, centred on Hyytiala measurements (Ilvesniemi et al. 2009, Fig. 6
 
 **If the check fails:** find which priors drive the failures (compare the parameter values of failing and passing draws), change only those, and only with a stated source or reason; record every change here and re-run. The frost-switch run is reported alongside, not used to pick between them.
 
+### D41. Implementation of the priors and the prior predictive check (2026-10-13)
+- **One list of priors** (`src/dalec/priors.py`, `PRIORS`), used by the prior predictive check now and by the PyMC model later, so they cannot disagree.
+- **`c_lf` draws outside the polynomial's range** (needles living longer than 8 years, about 0.3% of the prior) are drawn again from the same prior. This trims a tiny tail; D31's polynomial is not valid there.
+- **Prior predictive settings** in the config (`prior_predictive`): 1,000 draws, fixed seed 20261013, run in batches of 250.
+- **Diagnosis when a target is missed:** for every sampled quantity, the standardised difference between failing and passing draws on the prior's own scale (log, logit or plain); the largest ones point to the priors to revisit (D40, "if the check fails").
+- **The loader for model runs** (`load_record_with_drivers`, `load_model_block`) moved into `data_io.py`, shared by scripts 02 and 03.
+
+### D42. Prior predictive round 2: `ceff` prior (PROPOSED, 2026-10-13; awaiting the re-run)
+Following F12 and D40 ("change only the priors linked to failure, with a stated source"), only `ceff` changes in this round.
+- **New:** `ceff ~ LogNormal(median 10, sdlog 0.354)`, 95% 5 to 20. **Source:** the REFLEX DALEC model-data fusion experiment used a prior of 5 to 20 for the same ACM parameter ("nitrogen use efficiency parameter (a1) in ACM", Fox et al. 2009, Table 3; the previous repository cited it as Table 4). REFLEX includes an evergreen forest site.
+- **Replaces** D38's `LogNormal(16.5, 0.41)` (95% 7.4 to 37), which was built from `p11 x N` with an assumed needle N of 1 to 5 g N m-2.
+- **Honest tension:** a typical Scots pine needle N per area (about 1.2% N of dry mass on roughly 370 g dry mass m-2) would point to N near 4 and `ceff` near 30, i.e. higher, not lower. The prior predictive check says that, with DALEC2's fixed ACM coefficients (fitted at a temperate site, D22) and no cold limit (F9), such values make GPP implausibly high at Hyytiala. So `ceff` here acts as a site-level efficiency that also absorbs ACM's mismatch at a boreal site; it cannot be read as a physiological nitrogen value. This link between `ceff` and the fixed ACM coefficients is an identifiability point for RQ3.
+- **Gelman et al. (2020, Section 2.4)** allow priors to be revised after a prior predictive check, because no observations enter it; the revision must rest on outside knowledge (here a published prior), and both rounds are reported.
+- **Options not taken:** (B) setting `ceff` so that the implied annual GPP matches the site's plausible range (prior elicitation on an observable, also Section 2.4; rejected for now because the site GPP comes partly from the same tower); (C) keeping D38 and accepting the failure.
+
 ---
 
 ## Part 3. Likelihood
@@ -437,6 +452,15 @@ Implementation: the observation model is a config setting (`randunc_only` now; `
 - Spring onset with the 10-day rule (D16): median day 100, range 66 to 137 over the calibration years; evaluation years 93 to 111. See OPEN-3.
 
 **F11. Days are not independent (Figure K).** NEE anomalies are correlated with the next day (+0.37), two days later (+0.22) and a week later (+0.08); they reach zero by about two weeks. If days were independent, values would stay within +/-0.03. The Gaussian likelihood (L2) assumes independent days, so it treats the data as more informative than it is and the posterior may be too narrow. Recorded as a limitation; an error model with day-to-day correlation (for example AR(1), where each day's error carries part of the previous day's) is a possible later sensitivity analysis.
+
+**F12. Prior predictive check, round 1 (real data, 2026-10-13; D40).** 1,000 draws, seed 20261013.
+- **Tier 1 FAIL:** 34.7% of draws physically impossible (target at most 5%; the previous repository's published-range priors: 84%). Reasons: daily GPP above 20 (34.1%), annual GPP above 3,000 (20.8%), LAI above 12 (14.1%).
+- **Tier 2 FAIL:** 29.7% pass every check (target at least 50%). Per check: GPP 47.7%, Rh 63.1%, NEE 63.1%, peak LAI 54.8%, foliage ratio 48.5%, wood ratio 64.3%, soil ratio 55.2%.
+- **Priors linked to failure:** high `ceff` (+1.03), low `lma` (-0.86), low `c_lf` (-0.66), high `f_lab` and `f_fol`, low `f_auto`. Together: the **canopy feedback** (more leaf area, more GPP, more allocation to leaves). Respiration, soil and timing priors show little link.
+- **Plausible draws, medians:** GPP 1,560 (site about 1,030), Rh 488 (site 290 to 370), NEE -248, peak LAI 3.7 (site about 2.5 to 4), foliage end/start 0.83, wood 1.49, soil 1.04.
+- **Frost switch on (D24):** Tier 1 29.5%, Tier 2 37.8%; better, still failing.
+- **NEE seasonal cycle (Figure L, observed for context only):** winter and autumn match the observed cycle closely; summer observed values sit inside the middle half; **in spring nearly all prior draws turn to net uptake by early March, about six weeks before the observed cycle (mid-April)**. Because this appears across the whole prior, it is structural (no cold limit on photosynthesis; F9, Stettz et al. 2022), not something a prior can fix.
+- **Next (D40, "if the check fails"):** revisit only the canopy priors (`ceff` first, then `lma`, `c_lf`, allocation to leaves), each with a stated source.
 
 **F6. Evaluation block.** 608 of 1,461 evaluation days (41.6%) are excluded only because RANDUNC is missing: all of 2014 and the first half of 2011.
 

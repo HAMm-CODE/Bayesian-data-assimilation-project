@@ -29,11 +29,8 @@ import numpy as np
 import pandas as pd
 from matplotlib.colors import ListedColormap
 
-from dalec.config import load_config, resolve_path, year_block
-from dalec.data_io import (
-    MASK_NEE, MASK_QC, MASK_SIGMA, MASK_USE, add_masks, attach_temperature_extremes,
-    daily_temperature_extremes, load_fluxnet_dd,
-)
+from dalec.config import load_config, year_block
+from dalec.data_io import MASK_NEE, MASK_QC, MASK_SIGMA, MASK_USE, load_record_with_drivers
 from dalec.plotting import (
     BLUE, GREY, GREY_LIGHT, INK, INK_SOFT, ORANGE, UNIT_FLUX, VIOLET,
     W_M2_TO_MJ_M2_DAY, apply_style, climatology, day_of_year_365, heading, save_figure,
@@ -47,47 +44,8 @@ UNIT_SW = "MJ m$^{-2}$ d$^{-1}$"
 # ---------------------------------------------------------------------------
 
 def load_whole_record(config: dict[str, Any]) -> pd.DataFrame:
-    """Every day in the file, with the likelihood masks and daily max/min temperature added.
-
-    Uses the same building blocks as load_screened_block, without selecting
-    a year block, because Figure F shows the whole record. The daily highest and
-    lowest temperature come from the half-hourly file (DECISIONS.md, D18).
-    """
-    cols = config["columns"]
-    drv = config["drivers"]
-    ext = drv["temperature_extremes"]
-    missing = float(config["data"]["missing_value"])
-    data = load_fluxnet_dd(
-        resolve_path(config["paths"]["fluxnet_dd"]),
-        timestamp_column=cols["timestamp"],
-        required_columns=[cols["nee"], cols["sigma"], cols["qc"], *drv["model"].values(),
-                          ext["daily_check_column"]],
-        missing_value=missing,
-    )
-    extremes = daily_temperature_extremes(
-        resolve_path(config["paths"]["fluxnet_hh"]),
-        timestamp_column=ext["hh_timestamp"],
-        temperature_column=ext["hh_column"],
-        half_hours_per_day=int(ext["half_hours_per_day"]),
-        missing_value=missing,
-    )
-    data = attach_temperature_extremes(
-        data,
-        extremes,
-        mean_column=ext["daily_check_column"],
-        t_max_name=ext["t_max"],
-        t_min_name=ext["t_min"],
-        t_mid_name=ext["t_mid"],
-        half_hours_per_day=int(ext["half_hours_per_day"]),
-        mean_tolerance=float(ext["mean_tolerance"]),
-    )
-    return add_masks(
-        data,
-        nee_column=cols["nee"],
-        sigma_column=cols["sigma"],
-        qc_column=cols["qc"],
-        qc_threshold=float(config["data"]["qc_threshold"]),
-    )
+    """Every day in the file (Figure F shows the whole record); see data_io."""
+    return load_record_with_drivers(config)
 
 
 def in_years(data: pd.DataFrame, start: int, end: int) -> pd.DataFrame:

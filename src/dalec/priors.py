@@ -1,0 +1,90 @@
+"""The priors of DECISIONS.md D34 to D39, in one place.
+
+`PRIORS` is the single written-down list of every prior. `sample_prior` draws
+from it with numpy, for the prior predictive check (D40). The PyMC model built
+later must read the same list, so the two can never disagree.
+
+Prior kinds (all smooth, no hard walls; D33):
+    ("lognormal", median, sdlog)  log scale: spreads by factors
+    ("beta", a, b)                a fraction between 0 and 1
+    ("normal", mean, sd)          a position, such as a day of the year
+"""
+
+from typing import Any
+
+import numpy as np
+
+from dalec.model_numpy import Parameters
+
+# Allocation of growth carbon to labile, foliage, roots, wood (D34).
+DIRICHLET_ALPHA = {"f_lab": 13.06, "f_fol": 13.06, "f_roo": 15.26, "f_woo": 44.27}
+
+PRIORS: dict[str, tuple] = {
+    # group 1: allocation (D34); the four shares come from DIRICHLET_ALPHA
+    "f_auto": ("beta", 25.5, 24.5),
+    # group 2: turnover rates in d-1 (D35); theta_min comes from h
+    "theta_roo": ("lognormal", 1.78e-3, 0.45),
+    "theta_woo": ("lognormal", 5.33e-5, 0.39),
+    "theta_lit": ("lognormal", 1.22e-3, 0.41),
+    "theta_som": ("lognormal", 7.15e-5, 0.24),
+    "h": ("beta", 4.0, 16.0),   # share of decomposing litter that becomes soil carbon
+    # group 3: temperature exponent (D36)
+    "temperature_exponent": ("lognormal", 0.0336, 0.35),
+    # group 4: leaf timing (D37); days on the continuous counter, day 1 = 1 Jan 1997
+    "d_onset": ("normal", 145.0, 15.0),
+    "cr_onset": ("lognormal", 40.0, 0.35),
+    "d_fall": ("normal", 265.0, 15.0),
+    "cr_fall": ("lognormal", 60.0, 0.35),
+    "c_lf": ("beta", 14.51, 39.24),
+    # group 5: canopy (D38)
+    "lma": ("lognormal", 185.0, 0.25),
+    "ceff": ("lognormal", 10.0, 0.354),   # round 2 (D42): REFLEX range 5 to 20 as 95%; was median 16.5, sdlog 0.41
+    # group 6: starting pools in g C m-2 (D39)
+    "c_lab_0": ("lognormal", 77.0, 0.50),
+    "c_fol_0": ("lognormal", 590.0, 0.30),
+    "c_roo_0": ("lognormal", 238.0, 0.30),
+    "c_woo_0": ("lognormal", 5900.0, 0.25),
+    "c_lit_0": ("lognormal", 450.0, 0.50),
+    "c_som_0": ("lognormal", 6100.0, 0.25),
+}
+
+# Needle lifespan 1/c_lf must stay inside the range of the offset polynomial (D31).
+C_LF_RANGE = (1.0 / 8.0, 1.0 / 1.001)
+
+
+def _draw(kind: str, a: float, b: float, n: int, rng: np.random.Generator) -> np.ndarray:
+    if kind == "lognormal":
+        return a * np.exp(b * rng.standard_normal(n))
+    if kind == "beta":
+        return rng.beta(a, b, n)
+    if kind == "normal":
+        return a + b * rng.standard_normal(n)
+    raise ValueError(f"unknown prior kind {kind!r}")
+
+
+def sample_prior(n: int, rng: np.random.Generator) -> tuple[Parameters, dict[str, np.ndarray]]:
+    """Draw n parameter sets from the priors.
+
+    Returns the Parameters for the model and a dict of every sampled quantity
+    (including h and the four Dirichlet shares), for diagnostics.
+    """
+    raw = {name: _draw(*spec, n, rng) for name, spec in PRIORS.items()}
+
+    # c_lf outside the polynomial's range (about 0.3% of draws): draw again
+    # from the same prior until inside. This removes a tiny tail, recorded in D41.
+    low, high = C_LF_RANGE
+    bad = (raw["c_lf"] < low) | (raw["c_lf"] >= high)
+    while bad.any():
+        raw["c_lf"][bad] = _draw(*PRIORS["c_lf"], int(bad.sum()), rng)
+        bad = (raw["c_lf"] < low) | (raw["c_lf"] >= high)
+
+    shares = rng.dirichlet(list(DIRICHLET_ALPHA.values()), n)
+    growth = 1.0 - raw["f_auto"]
+    for k, name in enumerate(DIRICHLET_ALPHA):
+        raw[name] = growth * shares[:, k]
+
+    # theta_min from the share h (D35): h = theta_min / (theta_lit + theta_min)
+    raw["theta_min"] = raw["theta_lit"] * raw["h"] / (1.0 - raw["h"])
+
+    model_fields: dict[str, Any] = {k: v for k, v in raw.items() if k != "h"}
+    return Parameters(**model_fields), raw

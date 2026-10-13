@@ -192,6 +192,7 @@ class Output:
     lai: np.ndarray
     pools_start: dict[str, np.ndarray]
     pools_end: dict[str, np.ndarray]
+    pools_min: dict[str, np.ndarray]   # smallest value each pool reached
     total_carbon: np.ndarray   # sum of all pools, (draws, days + 1)
 
     @property
@@ -216,6 +217,7 @@ def run(params: Parameters, drivers: Drivers, *, latitude_deg: float,
 
     pools = {name: p[f"{name}_0"].copy() for name in POOLS}
     start = {name: v.copy() for name, v in pools.items()}
+    lowest = {name: v.copy() for name, v in pools.items()}
 
     out = {k: np.empty(shape + (n_days,)) for k in ("gpp", "ra", "rh", "nee", "lai")}
     total = np.empty(shape + (n_days + 1,))
@@ -262,7 +264,9 @@ def run(params: Parameters, drivers: Drivers, *, latitude_deg: float,
         out["nee"][..., i] = ra + rh - gpp
         out["lai"][..., i] = lai
         total[..., i + 1] = sum(pools.values())
+        for name in POOLS:
+            np.minimum(lowest[name], pools[name], out=lowest[name])
 
     return Output(gpp=out["gpp"], ra=out["ra"], rh=out["rh"], nee=out["nee"],
-                  lai=out["lai"], pools_start=start, pools_end=pools,
+                  lai=out["lai"], pools_start=start, pools_end=pools, pools_min=lowest,
                   total_carbon=total)

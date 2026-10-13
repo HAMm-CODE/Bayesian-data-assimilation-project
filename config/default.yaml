@@ -44,6 +44,11 @@ model:
     enabled: false
     threshold_degc: -2.0       # no GPP when (Tmax + Tmin) / 2 is below this
 
+prior_predictive:              # DECISIONS.md D40
+  n_draws: 1000
+  batch_size: 250              # draws run together; lower it if memory is short
+  seed: 20261013               # fixed so the check is reproducible
+
 eda:
   figure_formats: [pdf, png]   # pdf for the thesis, png for quick viewing
   figure_dpi: 300
