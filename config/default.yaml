@@ -2,6 +2,7 @@ paths:
   fluxnet_dd: data/raw/FLX_FI-Hyy_FLUXNET2015_FULLSET_DD_1996-2014_1-4.csv
   fluxnet_hh: data/raw/FLX_FI-Hyy_FLUXNET2015_FULLSET_HH_1996-2014_1-4.csv   # half-hourly, for daily max and min temperature
   figures: figures
+  results: results   # sampler output (*.nc); not tracked by git (D1)
 
 years:
   calibration: [1997, 2010]
@@ -48,6 +49,31 @@ prior_predictive:              # DECISIONS.md D40
   n_draws: 1000
   batch_size: 250              # draws run together; lower it if memory is short
   seed: 20261013               # fixed so the check is reproducible
+
+likelihood:                    # DECISIONS.md L1
+  observation_model: randunc_only    # main fit; randunc_plus_model_error for the sensitivity run
+  model_error_prior_sd: 1.0          # HalfNormal sd of sigma_m (g C m-2 d-1); sensitivity run only
+
+sampler:                       # NUTS settings, DECISIONS.md D49
+  chains: 4
+  tune: 1000                   # warm-up draws per chain (discarded)
+  draws: 1000                  # kept draws per chain
+  target_accept: 0.9           # PyMC default 0.8; higher = smaller, safer steps
+  cores: 4                     # chains run side by side; set 1 if parallel runs fail
+  seed: 20261014
+
+fake_data:                     # fake-data check, DECISIONS.md D48 and D49
+  seed: 20261015
+  n_candidates: 200            # prior draws searched for the true forest and the chain starts
+  interval: 0.90               # posterior interval used for the "truth recovered" check
+  min_covered: 20              # of the 24 sampled quantities, truth inside the interval
+  max_rhat: 1.01
+  min_ess: 400                 # bulk and tail effective sample size, every quantity
+  quick:                       # python scripts/04_fake_data_check.py --quick (runs, nothing judged)
+    years: 2
+    chains: 2
+    tune: 150
+    draws: 100
 
 eda:
   figure_formats: [pdf, png]   # pdf for the thesis, png for quick viewing

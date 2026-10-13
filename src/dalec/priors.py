@@ -1,8 +1,8 @@
 """The priors of DECISIONS.md D34 to D39, in one place.
 
 `PRIORS` is the single written-down list of every prior. `sample_prior` draws
-from it with numpy, for the prior predictive check (D40). The PyMC model built
-later must read the same list, so the two can never disagree.
+from it with numpy, for the prior predictive check (D40); the PyMC model
+(`inference.py`, D47) reads the same list, so the two can never disagree.
 
 Prior kinds (all smooth, no hard walls; D33):
     ("lognormal", median, sdlog)  log scale: spreads by factors
@@ -88,6 +88,20 @@ def sample_prior(n: int, rng: np.random.Generator) -> tuple[Parameters, dict[str
 
     model_fields: dict[str, Any] = {k: v for k, v in raw.items() if k != "h"}
     return Parameters(**model_fields), raw
+
+
+def to_prior_scale(name: str, values) -> np.ndarray:
+    """A sampled quantity on the scale its prior lives on (D32): log for
+    log-normal priors, logit for fractions (beta priors and the four allocation
+    shares), unchanged for normal priors. Used to compare spreads fairly."""
+    values = np.asarray(values, dtype=float)
+    kind = PRIORS[name][0] if name in PRIORS else "dirichlet"
+    if kind == "lognormal":
+        return np.log(values)
+    if kind in ("beta", "dirichlet"):
+        v = np.clip(values, 1e-12, 1 - 1e-12)
+        return np.log(v / (1 - v))
+    return values
 
 
 # ---------------------------------------------------------------------------

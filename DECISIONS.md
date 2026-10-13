@@ -28,7 +28,7 @@ Last updated: 2026-10-13 (full check of every entry against the current code, co
 - conda with the `conda-forge` channel only (`nodefaults` blocks Anaconda's default channel), because compiled scientific libraries such as PyMC and PyTensor install most reliably this way on Windows.
 - Python 3.13. Package names are unpinned while building; exact versions will be frozen into `environment.lock.yml` before producing thesis results.
 - Current versions (2026-10-07): Python 3.13.16, numpy 2.5.3, pandas 3.0.6, scipy 1.18.1, matplotlib 3.11.2.
-- **Added for the model (2026-10-13):** PyMC and PyTensor (the gradient model, D46, and the sampler) and pytest (runs the tests in `tests/`). Tested on the cloud test machine with PyMC 6.3.2 and PyTensor 3.3.3. They go into `environment.yml` from conda-forge like everything else; the versions on the author's machine are the ones frozen in the lock file.
+- **Added for the model (2026-10-13):** PyMC and PyTensor (the gradient model, D46, and the sampler), pytest (runs the tests in `tests/`), and netcdf4 (saves the posterior draws as `.nc` files; ArviZ needs it to write them). Tested on the cloud test machine with PyMC 6.3.2 and PyTensor 3.3.3. `pymc`, `pytest` and `netcdf4` go into `environment.yml` from conda-forge like everything else; PyTensor is not listed on its own, because PyMC installs the PyTensor version it needs, and naming it separately could ask for a version that does not fit; the versions on the author's machine are the ones frozen in the lock file.
 - On Roihu, follow CSC's current recommended way of installing Python environments; the package list stays the same.
 
 ### D7. Code layout (Decided)
@@ -389,6 +389,7 @@ All log-normal, centred on Hyytiala measurements (Ilvesniemi et al. 2009, Fig. 6
 - **Prior predictive settings** in the config (`prior_predictive`): 1,000 draws, fixed seed 20261013, run in batches of 250.
 - **Diagnosis when a target is missed:** for every sampled quantity, the standardised difference between failing and passing draws on the prior's own scale (log, logit or plain); the largest ones point to the priors to revisit (D40, "if the check fails").
 - **The loader for model runs** (`load_record_with_drivers`, `load_model_block`) moved into `data_io.py`, shared by scripts 02 and 03.
+- **The D40 checks** (`TIER2_BANDS`, `summarise_batch`, `evaluate`) moved from script 03 into `src/dalec/plausibility.py` (2026-10-13), because the fake-data check (D48) uses them too. One definition, so the two scripts cannot drift apart (as D17).
 
 ### D42. Prior predictive round 2: `ceff` prior (Decided, 2026-10-13, after the re-run, F13)
 Following F12 and D40 ("change only the priors linked to failure, with a stated source"), only `ceff` changes in this round.
@@ -433,10 +434,50 @@ Following F12 and D40 ("change only the priors linked to failure, with a stated 
 - **Organisation for speed:** weather-only terms are computed once in numpy; leaf timing and the temperature multiplier for all days at once outside the loop; only photosynthesis and the pool updates run inside `pytensor.scan`, with parameters passed as explicit `non_sequences` (the previous repository measured a 12x slower gradient through closures).
 - **Measured cost (cloud test machine, 14 years of synthetic weather):** about 40 ms for one value plus gradient of all 24 parameters, after a one-off compile of about 35 s. A NUTS draw needs roughly 50 to 250 such evaluations.
 - **Leaf timing uses the D31 polynomial** written as a PyTensor expression, so `c_lf` stays differentiable (D26).
-- **Tests:** 49 in total (`pytest`): ACM 14, numpy model 14, priors 10, PyTensor model 11 (the last group takes about 2 minutes because each case compiles the model).
-- **Not yet built:** the PyMC model that joins the priors, the D44 constraint and the likelihood (L1), and the fake-data check (Gelman et al. 2020, Section 4.1). These are the next step.
+- **Tests:** ACM 14, numpy model 14, priors 10, PyTensor model 11 (the last group takes a while because each case compiles the model). With the 4 tests of the PyMC model (D47), 53 in total.
+- The PyMC model that joins the priors, the D44 constraint and the likelihood is D47; the fake-data check is D48 and D49.
 
 ---
+
+## Part 2c. Fitting (Gelman et al. 2020, Sections 3 and 4; decided 2026-10-13)
+
+### D47. The PyMC model (`src/dalec/inference.py`) (Decided, 2026-10-13)
+**What it is.** log posterior = log priors (D34 to D43) + the soft foliage term (D44) + the log likelihood of daily NEE on assimilable days (L1, D12). It adds no new equations: the priors come from the one list in `priors.py` (D41) and the forward model from `model.py` (D46).
+- **Priors:** log-normal and beta priors are sampled on the log and logit scales (D32); the allocation split is a Dirichlet times `1 - f_auto` (D28); `theta_min` is computed from `theta_lit` and `h` (D35).
+- **`c_lf`:** a beta prior cut to needle lives of 1.001 to 8 years, the same rule as the numpy draws (D41). PyMC still samples it on a smooth, unbounded scale, so the cut is not a wall for NUTS.
+- **Soft constraint:** `pm.Potential` with `-0.5 (log Rs / log 2)^2` (D44).
+- **Likelihood:** `NEE_t ~ Normal(model_t, RANDUNC_t)` on assimilable days; the sensitivity version `sqrt(RANDUNC_t^2 + sigma_m^2)` with `sigma_m ~ HalfNormal(1)` is the same code with one config switch (`likelihood.observation_model`, L1).
+- **Checked (`tests/test_inference.py`):** at two different parameter sets, PyMC's log posterior equals the same sum computed independently with scipy and the numpy model, to 1e-9 relative, for both observation models.
+- **A bug found and fixed while testing:** PyTensor stores a plain Python number that fits exactly in 32 bits (such as 145.0 or 25.5) as a 32-bit number, so some prior densities were computed to only about 7 digits. Every prior constant is now made 64-bit. The effect on sampling would have been tiny, but the test now shows the model is exact.
+
+### D48. Fake-data check: design (Gelman et al. 2020, Section 4.1) (Decided, 2026-10-13)
+**Question:** if we knew the right answer, would the fit find it? Only if it does can a real-data result be trusted.
+- **The true forest:** the first of 200 prior draws (fixed seed) that passes every D40 check, Tier 1 and Tier 2. Believable, but not the prior centre, which would make the test too easy. Taking the first one that passes, rather than choosing, avoids picking a convenient truth.
+- **Fake NEE:** DALEC2 run with the true values on the real 1997-2010 weather, plus random normal noise with the real RANDUNC as its size, on the real assimilable days only. So the fake data have exactly the real gaps, the real winter-heavy weights and the real amount of information.
+- **Fitted with the main model** (`randunc_only`), because the fake noise is RANDUNC only.
+- **Options not taken:** the prior median as truth (too easy); several truths, or simulation-based calibration (Gelman et al. 2020, Section 4.2: hundreds of fits, too expensive at hours per fit). One fit is the minimum Gelman et al. recommend; a second truth can be added if the first shows problems.
+- **Quick run first** (`--quick`): 2 years, 2 short chains. It only shows that every step runs and gives a time estimate; nothing is judged ("fit fast, fail fast", Section 3.4).
+
+### D49. Sampler settings and pass criteria, written before running (Decided, 2026-10-13)
+**Settings** (config `sampler`): 4 chains, 1,000 warm-up and 1,000 kept draws each, `target_accept = 0.9` (smaller, safer steps than PyMC's default 0.8, because the prior check showed a narrow canopy region), fixed seed. Each chain starts from a different prior draw that passes Tier 1 (D45 safeguard 1), with PyMC's random "jitter" of the start switched off, because it can move a start by a factor of about 3 on the log scale and out of the plausible region.
+
+**Pass criteria for the fake-data check** (config `fake_data`):
+1. no divergences (a divergence = the sampler's step broke down, a sign it cannot explore part of the posterior);
+2. R-hat below 1.01 for every quantity (R-hat compares the chains; 1 = they agree);
+3. effective sample size at least 400, bulk and tail, for every quantity (how many independent draws the chains are worth);
+4. the true value inside the 90% posterior interval for at least 20 of the 24 sampled quantities.
+
+**Why these numbers.** 1 to 3 are the current standard thresholds (Vehtari et al. 2021). For 4: even a perfect fit misses about 1 in 10 at 90%, so about 2.4 misses are expected by chance; 20 of 24 allows for that. The quantities are not independent, so this is a judgement, stated before running.
+
+**Also reported, not pass/fail (RQ1 preview):** for each quantity, posterior width / prior width on the prior's scale. Below 0.5 = strongly informed by NEE; 0.5 to 0.9 = partly; 0.9 or more = not informed (D35, way forward 3). The prior widths are from the independent priors, without the D44 term.
+
+**If it fails:** look for the cause before changing anything (Gelman et al. 2020, Section 5): divergences point to geometry (then consider the D27 reparameterisation or a higher `target_accept`); a truth outside a narrow interval points to a bug or a non-identified pair; record every change here.
+
+### D50. Where the fake-data check runs: Roihu, with the existing container (Decided, 2026-10-13)
+- **Roihu, partition `small`**, account `project_2020170`: one node, 4 CPUs (one per chain), 32 GB, time limit 24 h (`small` allows 72 h; only the time used is billed). Job scripts: `jobs/fake_data_quick.sbatch`, `jobs/fake_data_full.sbatch`, shared set-up `jobs/roihu_setup.sh`.
+- **Python environment:** the Tykky container built for the previous repository (`/projappl/project_2020170/dalec-env`; Python 3.13, PyTensor 3.2.4, C++ compiler inside). Our code is not installed into it; it is found through `PYTHONPATH=src`, and the job stops if `dalec` would be loaded from anywhere else. **Checked:** all 53 tests pass with PyTensor 3.2.4. The PyMC and ArviZ versions in the container are printed at the start of every job.
+- **Why not a new container tonight:** building one takes time and the existing one already ran a model of the same size (3.9 h for 4 x 2,000 draws in the previous repository). A fresh container from `environment.yml` is the clean option before thesis results (D2, lock file).
+- **Order:** the quick job first; the full job is submitted with `--dependency=afterok`, so it starts only if the quick job finished without an error.
 
 ## Part 3. Likelihood
 
@@ -576,11 +617,11 @@ Implementation (planned): the observation model will be a config setting (`randu
 - D37: confirm the leaf onset timing (Schiestl-Aalto et al. 2013 or Schiestl-Aalto 2017) and the needle fall timing (monthly litterfall data).
 - F9: confirm the length of the frozen-soil season at Hyytiala from the soil temperature data (the previous notes say about four to six months).
 - D19: correct `research_plan_v2.md`, which still lists `VPD_F` as a driver.
-- D2: add PyMC, PyTensor and pytest to `environment.yml`; freeze `environment.lock.yml` before producing thesis results.
+- D2: add `pymc`, `pytest` and `netcdf4` to `environment.yml`; freeze `environment.lock.yml` before producing thesis results.
 - D44: raise with the supervisor that "no EDCs" became "a soft EDC on the foliage pool".
 - References marked "check" below: verify against the original papers.
 
-**OPEN-7. Choice of sampler.** NUTS as the only sampler is carried over from the previous repository and not yet re-assessed. Review it when fitting starts (Gelman et al. 2020, Section 3), using the D45 safeguards.
+**OPEN-7. Choice of sampler.** NUTS as the only sampler is carried over from the previous repository. Its settings are now fixed (D49), but alternatives are not yet re-assessed. Decide after the fake-data run: if it is too slow on the author's machine, the options are running on Roihu, or nutpie (another NUTS implementation that PyMC can call, often faster and with better warm-up, `nuts_sampler="nutpie"`).
 
 ### Planned sensitivity runs (decided in principle, to run after the main fit)
 
@@ -648,6 +689,7 @@ Not yet re-assessed:
 - Suni, T. et al. (2003). Air temperature triggers the recovery of evergreen boreal forest photosynthesis in spring. Global Change Biology 9, 1410-1426. (Details to check.)
 - Tramontana, G. et al. (2016). Predicting carbon dioxide and energy fluxes across global FLUXNET sites with regression algorithms. Biogeosciences 13, 4291.
 - Tuomi, M. et al. (2009). Leaf litter decomposition: estimates of global variability based on Yasso07 model. Ecological Modelling 220, 3362-3371. (Cited via the previous repository; check.)
+- Vehtari, A., Gelman, A., Simpson, D., Carpenter, B. and Burkner, P.-C. (2021). Rank-normalization, folding, and localization: an improved R-hat for assessing convergence of MCMC. Bayesian Analysis 16(2), 667-718.
 - Waring, R. H., Landsberg, J. J. and Williams, M. (1998). Net primary production of forests: a constant fraction of gross primary production? Tree Physiology 18, 129-134.
 - Williams, M. et al. (1997). Predicting gross primary productivity in terrestrial ecosystems. Ecological Applications 7(3), 882-894. (Cited for the frost rule, D24; the rule itself not yet found in it.)
 - Williams, M. et al. (2009). Improving land surface models with FLUXNET data. Biogeosciences 6, 1341-1359.

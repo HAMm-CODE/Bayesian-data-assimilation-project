@@ -4,7 +4,8 @@ Draws parameter sets from all priors at once (D34 to D39), runs DALEC2 with the
 real 1997-2010 weather for each, and asks: do the priors describe a believable
 boreal pine forest? The pass criteria were fixed in D40 before this was run.
 No NEE observations are used in the check; the observed NEE cycle appears in
-Figure L for context only.
+Figure L for context only. The D40 checks themselves live in
+`src/dalec/plausibility.py`, shared with the fake-data check (script 04).
 
 Run from the repository root:
     python scripts/03_prior_predictive.py
@@ -22,30 +23,15 @@ import pandas as pd
 
 from dalec.config import load_config, resolve_path, year_block
 from dalec.data_io import MASK_NEE, MASK_QC, load_model_block
-from dalec.model_numpy import POOLS, drivers_from_frame, run
+from dalec.model_numpy import drivers_from_frame
+from dalec.plausibility import (
+    TIER1_TARGET, TIER2_BANDS, TIER2_TARGET, evaluate, run_and_summarise,
+)
 from dalec.plotting import (
     BLUE, GREY_LIGHT, INK, INK_SOFT, UNIT_FLUX,
     apply_style, climatology, day_of_year_365, heading, save_figure, set_year_axis,
 )
-from dalec.priors import PRIORS, edc_log_weight, sample_prior, steady_state_ratio
-
-# ---------------------------------------------------------------------------
-# D40 criteria (copied from DECISIONS.md; change only together with D40)
-# ---------------------------------------------------------------------------
-
-TIER1_TARGET = 0.05   # at most 5% of draws physically impossible
-TIER2_TARGET = 0.50   # at least half of the draws pass every Tier-2 check
-
-TIER2_BANDS = {       # name: (low, high, label)
-    "gpp": (500.0, 2200.0, "annual GPP (g C m$^{-2}$ yr$^{-1}$)"),
-    "rh": (145.0, 740.0, "annual heterotrophic respiration (g C m$^{-2}$ yr$^{-1}$)"),
-    "nee": (-700.0, 300.0, "annual NEE (g C m$^{-2}$ yr$^{-1}$)"),
-    "peak_lai": (1.5, 8.0, "peak LAI (mean of yearly maxima)"),
-    "foliage_ratio": (1.0 / 3.0, 3.0, "foliage pool, end / start"),
-    "wood_ratio": (0.8, np.inf, "wood pool, end / start"),
-    "soil_ratio": (0.7, 1.3, "soil pool, end / start"),
-}
-
+from dalec.priors import edc_log_weight, sample_prior, to_prior_scale
 
 # ---------------------------------------------------------------------------
 # Running the draws
@@ -60,71 +46,9 @@ def doy_weights(index: pd.DatetimeIndex) -> np.ndarray:
     return weights / weights.sum(axis=0)
 
 
-def summarise_batch(out, years: np.ndarray, weights: np.ndarray) -> dict[str, np.ndarray]:
-    """Per-draw numbers needed by D40, from one batch of model runs."""
-    year_values = np.unique(years)
-    def annual(series):   # (draws, years) of yearly totals
-        return np.stack([series[:, years == y].sum(axis=1) for y in year_values], axis=1)
-
-    gpp_year = annual(out.gpp)
-    lai_year_max = np.stack([out.lai[:, years == y].max(axis=1) for y in year_values], axis=1)
-    finite = np.isfinite(out.nee).all(axis=1) & np.all(
-        [np.isfinite(out.pools_end[p]) for p in POOLS], axis=0)
-    return {
-        "finite": finite,
-        "negative_pool": np.any([out.pools_min[p] < 0 for p in POOLS], axis=0),
-        "lai_max": out.lai.max(axis=1),
-        "gpp_daily_max": out.gpp.max(axis=1),
-        "gpp_annual_max": gpp_year.max(axis=1),
-        "gpp": gpp_year.mean(axis=1),
-        "rh": annual(out.rh).mean(axis=1),
-        "nee": annual(out.nee).mean(axis=1),
-        "peak_lai": lai_year_max.mean(axis=1),
-        "foliage_ratio": out.pools_end["c_fol"] / out.pools_start["c_fol"],
-        "wood_ratio": out.pools_end["c_woo"] / out.pools_start["c_woo"],
-        "soil_ratio": out.pools_end["c_som"] / out.pools_start["c_som"],
-        "nee_cycle": out.nee @ weights,   # (draws, 365)
-        "foliage_rs": steady_state_ratio(out.pools_in["c_fol"], out.pools_out["c_fol"],
-                                         out.pools_yearly["c_fol"].mean(axis=-1),
-                                         out.pools_start["c_fol"]),
-    }
-
-
-def run_all(params, drivers, latitude: float, frost: float | None, years, weights,
-            batch_size: int) -> dict[str, np.ndarray]:
-    """Run every draw in batches and stack the per-draw summaries."""
-    p = params.as_arrays()
-    n = p["f_auto"].shape[0]
-    parts = []
-    for start in range(0, n, batch_size):
-        stop = min(start + batch_size, n)
-        batch = type(params)(**{k: v[start:stop] for k, v in p.items()})
-        with np.errstate(all="ignore"):   # impossible draws may overflow; they are counted
-            out = run(batch, drivers, latitude_deg=latitude, frost_threshold_degc=frost)
-            parts.append(summarise_batch(out, years, weights))
-        print(f"  draws {start + 1}-{stop} of {n} done")
-    return {k: np.concatenate([part[k] for part in parts]) for k in parts[0]}
-
-
 # ---------------------------------------------------------------------------
 # Applying D40
 # ---------------------------------------------------------------------------
-
-def evaluate(m: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
-    """True/False per draw for every D40 check."""
-    checks = {
-        "not a number": ~m["finite"],
-        "a pool below zero": m["negative_pool"],
-        "LAI above 12": m["lai_max"] > 12,
-        "daily GPP above 20": m["gpp_daily_max"] > 20,
-        "annual GPP above 3,000": m["gpp_annual_max"] > 3000,
-    }
-    tier1_fail = np.any(list(checks.values()), axis=0)
-    tier2 = {name: (m[name] >= low) & (m[name] <= high) & ~tier1_fail
-             for name, (low, high, _) in TIER2_BANDS.items()}
-    return {"tier1_reasons": checks, "tier1_fail": tier1_fail, "tier2": tier2,
-            "tier2_all": np.all(list(tier2.values()), axis=0)}
-
 
 def report(result: dict[str, Any], title: str) -> None:
     heading(title)
@@ -142,17 +66,6 @@ def report(result: dict[str, Any], title: str) -> None:
         print(f"      {name:14s} {flag.mean():6.1%} inside the band")
 
 
-def prior_scale(name: str, values: np.ndarray) -> np.ndarray:
-    """A sampled quantity on the scale its prior lives on (log, logit or plain)."""
-    kind = PRIORS[name][0] if name in PRIORS else "dirichlet"
-    if kind == "lognormal":
-        return np.log(values)
-    if kind in ("beta", "dirichlet"):
-        v = np.clip(values, 1e-12, 1 - 1e-12)
-        return np.log(v / (1 - v))
-    return values
-
-
 def drivers_of_failure(raw: dict[str, np.ndarray], failed: np.ndarray, label: str) -> dict[str, float]:
     """Which priors push draws into failure? For every sampled quantity, the
     standardised difference of means between failing and passing draws, on the
@@ -163,7 +76,7 @@ def drivers_of_failure(raw: dict[str, np.ndarray], failed: np.ndarray, label: st
     for name, values in raw.items():
         if name == "theta_min":      # follows from theta_lit and h
             continue
-        x = prior_scale(name, values)
+        x = to_prior_scale(name, values)
         links[name] = float((x[failed].mean() - x[~failed].mean()) / x.std())
     print(f"\n  All sampled quantities, linked to '{label}' (failing minus passing):")
     for name, diff in sorted(links.items(), key=lambda kv: -abs(kv[1])):
@@ -290,7 +203,8 @@ def main() -> None:
 
     heading(f"Running {settings['n_draws']} prior draws over {drivers.n_days} days "
             "(main model: no frost cut-off)")
-    main_run = run_all(params, drivers, latitude, None, years, weights, int(settings["batch_size"]))
+    main_run = run_and_summarise(params, drivers, latitude, None, years, weights,
+                                 int(settings["batch_size"]))
     main_result = evaluate(main_run)
     report(main_result, "Prior predictive check, main model (D40)")
     tier1_links = drivers_of_failure(raw, main_result["tier1_fail"], "Tier 1 failure")
@@ -299,7 +213,8 @@ def main() -> None:
 
     heading("Same draws with the frost switch on (D24), reported alongside")
     frost = float(config["model"]["frost_cutoff"]["threshold_degc"])
-    frost_run = run_all(params, drivers, latitude, frost, years, weights, int(settings["batch_size"]))
+    frost_run = run_and_summarise(params, drivers, latitude, frost, years, weights,
+                                  int(settings["batch_size"]))
     report(evaluate(frost_run), f"Prior predictive check, frost cut-off at {frost} degC")
 
     weighted_report(main_result, edc_weights(main_run),
