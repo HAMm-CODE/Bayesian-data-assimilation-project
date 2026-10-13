@@ -379,7 +379,7 @@ Following F12 and D40 ("change only the priors linked to failure, with a stated 
 - **Why:** `c_lf` is the only prior linked to both failure modes (F13). D37's prior was **wider than its own source**: Pensa and Jalkanen (1999) report mean needle retention of 3.4 to 4.2 years in southern Finland; 3 to 5 years covers that with a margin (the previous repository used the same 3 to 5 years). Narrowing a prior to what its source supports is outside knowledge, not tuning to the check (D40, Gelman et al. 2020, Section 2.4).
 - **Not changed in this round:** `lma` (linked to Tier 1, but its width reflects the unresolved LAI convention, D38); kept for round 4 if needed.
 
-### D44. Soft steady-state constraint on the foliage pool (PROPOSED, 2026-10-13; awaiting the re-run)
+### D44. Soft steady-state constraint on the foliage pool (DECIDED 2026-10-13, after the re-run, F15)
 **What.** The joint prior gets one extra smooth term: `log p += -0.5 (log Rs / log 2)^2`, where for the foliage pool `Rs = (total inputs / total outputs over the run) x (mean pool on each 1 January) / (pool at the start)`. A foliage pool in balance has `Rs = 1` and no penalty; a pool running away (`Rs` above 1) or collapsing (below 1) is made less likely, smoothly. Code: `steady_state_ratio` and `edc_log_weight` in `priors.py`.
 
 **Source: the official DALEC2 code.** `DALEC_400/EDC2_400.c` implements "EDCs 7-12" exactly this way for every pool, with equilibrium factor `EQF = 2` by default: it rejects a draw when `|log Rs| > log(EQF)` and also stores the Gaussian version `-0.5 (log Rs / log EQF)^2` ("EDCPROB"). The growth-rate and decay-rate rules described as EDC 7 and EDC 8 in Bloom and Williams (2015) are commented out in that code version and replaced by this steady-state form. Where paper and code differ we follow the code (as in D21 to D31).
@@ -392,6 +392,15 @@ Following F12 and D40 ("change only the priors linked to failure, with a stated 
 **How it is tested.** The prior predictive script re-weights the same 1,000 draws by the constraint (importance re-weighting, Gelman et al. 2020, Section 6.3) and reports the D40 rates under the new joint prior, plus the effective number of draws. No new sampling is needed.
 
 **Honest caveat.** The constraint and the Tier-2 "foliage end/start" check measure related things, so part of the improvement is expected by construction. The justification for adding it is the official code, not the check.
+
+### D45. Step 3 closed: the joint prior is D34 to D44; the narrow Tier 1 miss is accepted (2026-10-13)
+**Decision.** Stop revising priors. The prior used for fitting is the independent priors D34 to D43 plus the soft foliage constraint D44.
+**Why stop here.** Four rounds took impossible draws from 84% (previous repository) and 34.7% (round 1) to 6.4%, and Tier 2 now passes. The remaining 6.4% are mostly days with GPP above 20 g C m-2 d-1; such draws imply daily NEE far beyond anything observed (summer observations about -2 to -4), so the likelihood rules them out directly. Further narrowing has small returns and would push priors past what their sources support (Gelman et al. 2020, Section 7.3: priors should encode knowledge, not be tuned until a check passes).
+**The miss is reported, not hidden:** D40's 5% target is kept as written; the thesis states 6.4% against 5%, with this reasoning.
+**Safeguards for fitting:**
+1. Start every NUTS chain from a prior draw that passes Tier 1, so no chain begins in a broken region.
+2. Watch divergences and chains stuck at extreme GPP or LAI; if they appear, revisit `lma` (strongest remaining Tier 1 link after `ceff`) or extend D44 to the labile pool.
+3. The frost switch stays a sensitivity run (D24), not a fix chosen by this check.
 
 ---
 
@@ -503,6 +512,18 @@ Implementation: the observation model is a config setting (`randunc_only` now; `
 - Medians: Rh 433, NEE -93, peak LAI 3.4, foliage 0.63, wood 1.31, soil 1.00.
 - Links: Tier 1 still the canopy group (`ceff` +1.15, `lma` -1.11, `f_auto` -0.81, `f_lab` +0.78, `f_fol` +0.68, `c_lf` -0.67); Tier 2 links all below 0.3 (`c_lf` +0.29), i.e. no single prior stands out any more.
 - **Reading:** both targets are now narrowly missed, and narrowing single priors has reached diminishing returns (Tier 1: 34.7, 9.3, 8.6). The remaining failures are canopy runaway and collapse, which is exactly what Bloom and Williams (2015) remove with their ecological dynamic constraints EDC 7 (no pool grows faster than 10% per year) and EDC 8 (no pool decays with a half-life under 3 years). This project dropped EDCs because hard accept/reject rules break NUTS (carried-over decision).
+
+**F15. Prior predictive check with the soft foliage constraint (D44; real data, 2026-10-13).** Same 1,000 draws as round 3, re-weighted by the constraint (effective number of draws 808; 1.0% of draws get almost no weight).
+| | Round 3 (independent priors) | **With D44** | Target |
+|---|---|---|---|
+| Tier 1, impossible | 8.6% | **6.4%** | at most 5% (narrow miss) |
+| Tier 2, pass all | 47.6% | **63.1%** | at least 50% (PASS) |
+| foliage end/start in band | 61.8% | 81.3% | |
+| GPP in band | 72.5% | 83.7% | |
+| peak LAI in band | 74.3% | 85.0% | |
+- Remaining Tier 1 failures: daily GPP above 20 (5.8%), LAI above 12 (3.1%), annual GPP above 3,000 (2.1%).
+- With the frost switch on as well: Tier 1 4.8%, Tier 2 64.7% (both pass); reported alongside only (D24, D40), not used to choose.
+- Part of the foliage improvement is expected by construction (D44 caveat); GPP and LAI checks improved too, which the constraint does not target directly.
 
 **F6. Evaluation block.** 608 of 1,461 evaluation days (41.6%) are excluded only because RANDUNC is missing: all of 2014 and the first half of 2011.
 
