@@ -7,7 +7,7 @@ Each entry is marked with a status:
 - **Proposed**: preferred option chosen, not yet final.
 - **Open**: still to be decided; the options are recorded.
 
-Last updated: 2026-10-12.
+Last updated: 2026-10-13.
 
 ---
 
@@ -216,11 +216,49 @@ The figures:
 
 **Option not taken.** `TA_F`, the true average of 48 half-hours, is slightly more accurate physically and is a defensible reading of "daily mean temperature". It was not chosen because the only explicit definition found (Chuter et al. 2015) is the midpoint, and the DALEC2 driver list contains only minimum and maximum.
 
-**Size of the difference.** Figure H prints the average and spread of `t_mid - TA_F` on the real data, so the thesis can state how much this choice matters.
+**Size of the difference (real data, calibration block, 2026-10-12).** `t_mid - TA_F` averages -0.10 C; 90% of days lie between -1.05 and +0.78 C. Thesis sentence: the midpoint differs from the 24-hour mean by 0.1 C on average.
+
+**Confirmed by the official code (2026-10-13).** The DALEC2 source code (CARDAMOM, `C/projects/CARDAMOM_MODELS/DALEC/DALEC_400/DALEC_400.c`, "Code used by Bloom et al., 2016. See also Bloom & Williams 2015") computes the decomposition multiplier as `exp(pars[9]*0.5*(maxtemp + mintemp))`, i.e. the midpoint. D20 matches the model as its authors run it, not only one paper's wording.
 
 **Daily `TA_F` is still read**, but only for the D18 safety check (`drivers.temperature_extremes.daily_check_column`).
 
-**Possible sensitivity check.** Because the two readings are both defensible, a short run with `TA_F` instead of `t_mid` would show whether the choice moves the posterior. Worth doing only if Figure H shows a sizeable difference.
+**Possible sensitivity check.** Because the two readings are both defensible, a short run with `TA_F` instead of `t_mid` would show whether the choice moves the posterior. Worth doing only if Figure H shows a sizeable difference. **Result: not needed.** An average difference of 0.1 C is small next to the 6.3 C daily range and the seasonal swing, so the run is dropped.
+
+---
+
+## Part 2b. Model structure (decided 2026-10-13; details in MODEL.md)
+
+**Reference used.** Besides the papers, the official DALEC2 code (CARDAMOM, `DALEC_400`) was read: `DALEC_400.c`, `PARS_INFO_400.c`, `DALEC_ALL/ACM.c`, `DALEC_ALL/offset.c` (github.com/CARDAMOM-framework/CARDAMOM). Its header says it is the code used by Bloom et al. (2016), with Bloom and Williams (2015) as the model description. Where paper and code disagree, the code shows what the authors actually run. Caveat: its prior ranges are the 2016 ones and differ from the 2015 Table 1 (relevant to priors, not structure).
+
+### D21. ACM in the Chuter et al. (2015) form (M1)
+Day length from latitude and solar declination, conductance `|psi_d|^a10 / (0.5 Tr + a6 R_tot)`, temperature on `Tmax`. **Why:** `ACM.c` in the official code computes exactly this. The Williams et al. (1997) form has no latitude in its day length and would overstate winter GPP at 62 N. This was an assumption in the previous repository; it is now confirmed.
+
+### D22. ACM coefficients are DALEC2's fixed constants, at full precision (M2)
+`a2 = 0.0156935, a3 = 4.22273, a4 = 208.868, a5 = 0.0453194, a6 = 0.37836, a7 = 7.19298, a8 = 0.011136, a9 = 2.1001, a10 = 0.789798, psi_d = -2.0 MPa, R_tot = 1.0` (`DALEC_400.c`, `constants[]` and `gpppars[]`). **Why:** these are not a site choice; DALEC2 fixes them. They equal the "Loobos" set of Chuter et al. (2015), which the previous repository used in rounded form (for example 0.0156). They were fitted outside the boreal zone; stated limitation.
+
+### D23. Solar day counted from 21 December (`doy + 10`) (M3)
+**Why:** the declination in `ACM.c` uses `(yearday + 10)`, matching Chuter et al. Section II.A. Without it the seasonal cycle of day length is 10 days late.
+
+### D24. No frost cut-off in the main model; kept as a switch (M4)
+The previous repository stopped GPP when `(Tmax + Tmin)/2 < -2 C`. **Why not by default:** no such rule exists in the official code, and the cited precedent (Williams et al. 1997, Oregon conifers) has not been verified. Without it the thesis can state that DALEC2 is calibrated as distributed. (Note: the code's `gpppars[8] = -2.0` is the leaf water potential `psi_d`, not a frost threshold.) **Kept as a switch** because winter days carry most of the likelihood weight and DALEC2 lacks cold limitation on photosynthesis (F9, Stettz et al. 2022); it is tested once in the prior predictive check and once as a sensitivity run.
+
+### D25. A8 corrected: leaf fall anchored on `d_fall` (M5)
+`Phi_fall` uses `t - d_fall + psi_f`, not the printed `t - cr_fall + psi_f`. **Why:** the official code anchors leaf fall on its "Fday" parameter (`pars[14]`), the leaf-fall day, mirroring how leaf onset is anchored on "Bday". The printed A8 is a typo. This also removes the previous repository's inert `d_fall`.
+
+### D26. All five phenology parameters are fitted, with site-based ranges (M6)
+`d_onset`, `cr_onset`, `d_fall`, `cr_fall`, `c_lf` are sampled. **Why:** RQ1 and RQ3 ask what NEE can constrain; fixing parameters would hide the answer. The ranges are set in step 3 from Scots pine knowledge at Hyytiala, not the 1 to 365 day published range.
+
+### D27. Starting pools are sampled, with priors centred on site measurements (M7)
+All six `C(0)` are parameters with priors from Hyytiala stock measurements (Ilvesniemi et al. 2009; set in step 3). **Why:** the simplest first model (Gelman et al. 2020, Section 2.1). **Fallback:** the previous repository's reparameterisation (sample soil respiration and its split, derive the litter and soil pools) if the sampler struggles with the strong link between a turnover rate and its pool.
+
+### D28. Allocation through a Dirichlet split (M8)
+`f_auto` plus a Dirichlet split of the remaining `1 - f_auto` across labile, foliage, roots and wood. **Why:** the official code instead splits step by step (foliage share of NPP, then labile share of the rest, then roots, wood taking the remainder). Both forms reach exactly the same set of allocations, so the model is the same; only the way the prior is written differs. The Dirichlet makes site-based priors simple and never produces negative fractions. This also re-frames correction 1 in `MODEL.md`: the paper's footnote is a shorthand of the code's step-by-step split.
+
+### D29. LAI convention moved to the priors (M9)
+It only changes the prior range of `lma`, so it is decided with that prior in step 3.
+
+### D30. Phenology uses a continuous day counter (M10)
+The leaf onset and leaf fall pulses use `t`, the number of days since the start of the run, not the day of year. **Why:** the official code does this (`MET[:,0]`, "projday"). With a 365.25-day cycle, a day-of-year counter that restarts every 1 January causes a small jump each year. Day length (B5) still uses the day of year, as in the code.
 
 ---
 
@@ -295,6 +333,13 @@ Implementation: the observation model is a config setting (`randunc_only` now; `
 
 **F8. Driver completeness.** In the full record, the model drivers are complete except CO2 (0.3% empty, expected to be the 19 days at the start of 1996). Soil temperature and soil water are 1 to 5% empty; net radiation 21%, diffuse shortwave 46%, soil heat flux 46%, diffuse photosynthetic light 77%.
 
+**F10. First real-data run of the driver figures (2026-10-12).**
+- The half-hourly safety check (D18) passed: every day has 48 valid half-hours, and the half-hourly mean matches the daily `TA_F` within 0.05 C on every day.
+- True daily temperature range averages 6.3 C over 1997-2010. All model inputs are complete in the calibration block (no missing days).
+- Spring onset with the 10-day rule (D16): median day 100, range 66 to 137 over the calibration years; evaluation years 93 to 111. See OPEN-3.
+
+**F11. Days are not independent (Figure K).** NEE anomalies are correlated with the next day (+0.37), two days later (+0.22) and a week later (+0.08); they reach zero by about two weeks. If days were independent, values would stay within +/-0.03. The Gaussian likelihood (L2) assumes independent days, so it treats the data as more informative than it is and the posterior may be too narrow. Recorded as a limitation; an error model with day-to-day correlation (for example AR(1), where each day's error carries part of the previous day's) is a possible later sensitivity analysis.
+
 **F6. Evaluation block.** 608 of 1,461 evaluation days (41.6%) are excluded only because RANDUNC is missing: all of 2014 and the first half of 2011.
 
 ---
@@ -303,21 +348,19 @@ Implementation: the observation model is a config setting (`randunc_only` now; `
 
 **OPEN-1. Evaluation mask.** Evaluation needs sigma only for probability-based checks (for example, predictive interval coverage). Error measures like RMSE need only NEE and QC. Using QC alone keeps 1,418 instead of 810 evaluation days (adds 2014 and early 2011). Decide when designing the evaluation chapter.
 
-**OPEN-3. Spring onset number.** The previous EDA found a median observed onset of day 96 (range 58 to 117) with the 10-day rule, while project notes mention an observed onset of day 110 in the model comparison. These probably come from different definitions or data. Pick one definition (D16 uses the 10-day rule) and use it consistently in the thesis.
+**OPEN-3. Spring onset number.** The previous EDA found a median observed onset of day 96 (range 58 to 117) with the 10-day rule, while project notes mention an observed onset of day 110 in the model comparison. The new code gives a median of day 100 (range 66 to 137) for 1997-2010 (F10), so three numbers now exist. These probably come from different definitions or data. Pick one definition (D16 uses the 10-day rule) and use it consistently in the thesis.
 
 **OPEN-4. Daily temperature extremes (F7).** Closed 2026-10-12: derived from the half-hourly file (D18).
 
+**OPEN-5. Model structure.** Closed 2026-10-13: M1 to M8 and M10 decided (D21 to D28, D30); M9 moved to the priors (D29).
+
 ### Carried over from the previous repository, not yet re-assessed
 
-These will be reviewed when the work reaches them:
+These will be reviewed when the work reaches them (allocation, ACM form, LAI convention and `d_fall` were re-assessed on 2026-10-13: D21, D25, D28, D29):
 
-- Dirichlet reparameterisation of the allocation fractions.
 - No EDC constraints (they break differentiability for NUTS).
 - No VPD driver.
 - NUTS as the only sampler.
-- ACM photosynthesis implemented from Chuter et al. (2015), not Williams et al. (1997).
-- LAI convention (hemisurface vs projected) kept as a two-way sensitivity run.
-- `d_fall` inert as transcribed from Bloom and Williams (2015), equation A8.
 
 ---
 
@@ -325,6 +368,8 @@ These will be reviewed when the work reaches them:
 
 - Bacour, C. et al. (2023). Assimilation of multiple datasets results in large differences in regional- to global-scale NEE and GPP budgets simulated by a terrestrial biosphere model. Biogeosciences 20, 1089-1111.
 - Bloom, A. A. and Williams, M. (2015). Constraining ecosystem carbon dynamics in a data-limited world: integrating ecological "common sense" in a model-data fusion framework. Biogeosciences 12, 1299-1315.
+- Bloom, A. A., Exbrayat, J.-F., van der Velde, I. R., Feng, L. and Williams, M. (2016). The decadal state of the terrestrial carbon cycle: global retrievals of terrestrial carbon allocation, pools, and residence times. PNAS 113(5), 1285-1290. (Version of DALEC2 in the CARDAMOM code `DALEC_400`.)
+- CARDAMOM framework, source code. github.com/CARDAMOM-framework/CARDAMOM, files `C/projects/CARDAMOM_MODELS/DALEC/DALEC_400/DALEC_400.c`, `PARS_INFO_400.c`, `DALEC_ALL/ACM.c`, `DALEC_ALL/offset.c` (read 2026-10-13).
 - Chuter, A. M., Aston, P. J., Skeldon, A. C. and Roulstone, I. (2015). A dynamical systems analysis of the data assimilation linked ecosystem carbon (DALEC) models. Chaos 25(3), 036401. (Journal details from the previous repository; the quote in D20 was read from the manuscript at personalpages.surrey.ac.uk/a.skeldon/DALEC_paper.pdf, dated 8 December 2014. Check against the published article.)
 - Delahaies, S., Roulstone, I. and Nichols, N. (2017). Constraining DALEC v2 using multiple data streams and ecological constraints: analysis and application. Geoscientific Model Development 10, 2635-2650.
 - Douglas, et al. (2026). Regularisation of the 4DEnVar data assimilation method for calibration of land surface models. EGUsphere preprint.

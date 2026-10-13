@@ -6,13 +6,15 @@ starting point for the priors and the code.
 This is **step 1** of Gelman et al. (2020), Section 2 ("Before fitting a model"):
 write the model down before fitting it. Steps 2 and 3, choosing the scale and
 prior for each parameter, fill the empty columns of the parameter table in
-Section 6. Open model choices are listed in Section 8 and are moved to
-`DECISIONS.md` once decided.
+Section 6. The model-structure choices are decided (Section 8, `DECISIONS.md`
+D21 to D30).
 
-Status: draft, 2026-10-12. Equations transcribed from Bloom and Williams (2015,
-Appendix A) and Chuter et al. (2015, Appendix B), cross-checked against the
-previous repository. Every equation must still be checked against the PDFs
-before it goes into the thesis (see Section 9).
+Status: 2026-10-13. Equations from Bloom and Williams (2015, Appendix A) and
+Chuter et al. (2015, Appendix B), checked against the **official DALEC2 code**
+(CARDAMOM, `DALEC_400`, the version used by Bloom et al. 2016) and the previous
+repository. Where the printed paper and the code differ, this file follows the
+code and says so. Equations must still be checked against the PDFs before they
+go into the thesis (Section 9).
 
 ---
 
@@ -72,12 +74,13 @@ same NEE. Randomness enters only through the likelihood (`DECISIONS.md` L1, L2).
 | `Tr` | daily temperature range, `Tmax - Tmin` | degC | computed |
 | `I` | incoming shortwave radiation, daily total | MJ m-2 d-1 | `SW_IN_F` x 0.0864 |
 | `Ca` | atmospheric CO2 | umol mol-1 | `CO2_F_MDS` |
-| `doy` | day of year | day | from the date |
+| `doy` | day of year (resets every 1 January) | day | from the date; used for day length |
+| `t` | days since the start of the run (never resets) | day | from the date; used for leaf timing (D30) |
 
 **Fixed site constant:** latitude 61.85 N (sets day length).
 
 **Fixed model constants** (not fitted): the ACM coefficients `a2` to `a10`,
-`psi_d` and `R_tot` (Section 7), and the phenology constants `s`, 6.9088 and
+`psi_d` and `R_tot` (Section 7, D22), and the phenology constants `s`, 6.9088 and
 0.6245 (Section 3.3).
 
 ## 3. Equations
@@ -102,7 +105,7 @@ then using its new value in another equation would give wrong numbers).
 `e^(Theta T)` is the **temperature multiplier**: decomposition speeds up
 exponentially as it gets warmer. At `T = 0 degC` it equals 1, so the `theta`
 rates of litter and soil are their rates at 0 degC. `T` is the midpoint
-temperature (D20).
+temperature (D20); the official code computes it the same way.
 
 `theta_min` moves carbon from litter into soil. It is a transfer, not a loss, so
 it does not appear in respiration.
@@ -133,14 +136,15 @@ The code will test this on every run.
 Phenology is the timing of leaf growth and leaf fall. Each day, a fraction
 `Phi_onset` of the labile pool moves into the foliage, and a fraction `Phi_fall`
 of the foliage drops into the litter. Both are bell-shaped pulses once a year.
+`t` is the continuous day counter (D30), as in the official code.
 
 ```
 (A7) Phi_onset = sqrt(2/pi) (6.9088 / cr_onset)
-                 exp( -[ sin((doy - d_onset - 0.6245 cr_onset) / s) sqrt(2) s / cr_onset ]^2 )
+                 exp( -[ sin((t - d_onset - 0.6245 cr_onset) / s) sqrt(2) s / cr_onset ]^2 )
 
 (A8) Phi_fall  = sqrt(2/pi) (-log(1 - c_lf) / cr_fall)
-                 exp( -[ sin((doy - cr_fall + psi_f) / s) sqrt(2) s / cr_fall ]^2 )
-                 (as printed; see correction 2 in Section 4)
+                 exp( -[ sin((t - d_fall + psi_f) / s) sqrt(2) s / cr_fall ]^2 )
+                 (corrected: the paper prints cr_fall where d_fall belongs; D25)
 
      s = 365.25 / pi
 
@@ -148,20 +152,27 @@ of the foliage drops into the litter. Both are bell-shaped pulses once a year.
 ```
 
 `psi` is not a parameter: it is calculated from `c_lf`. The previous repository
-solved A9 numerically. **Check against the PDF:** one text extraction of the
-paper showed `exp(-psi^2 / 2)` in A9 instead of `exp(-psi^2)`.
+solved A9 numerically. The official code instead uses a fitted sixth-order
+polynomial (`offset.c`) written in leaf lifespan `L = 1 / c_lf`; both should
+give the same offset. **Check against the PDF:** one text extraction of the
+paper showed `exp(-psi^2 / 2)` in A9 instead of `exp(-psi^2)`. The code's
+polynomial can settle this numerically.
+
+The `sin` has a period of 730.5 days, and it is squared, so each pulse repeats
+every 365.25 days.
 
 Hyytiala is an **evergreen** pine forest: it keeps its needles all year and
-sheds only the oldest ones. How these deciduous-style pulses should behave there
-is an open choice (M6).
+sheds only the oldest ones. In DALEC2 terms, the onset pulse is the spring flush
+of new shoots and the fall pulse is the autumn drop of old needles. All five
+phenology parameters are fitted, with site-based ranges (D26).
 
 ### 3.4 Photosynthesis: the Aggregated Canopy Model (ACM)
 
 Bloom and Williams (2015) give GPP only as a function from ACM (Williams et al.
 1997). The form DALEC actually uses is written out by Chuter et al. (2015,
 Appendix B, Eq. 12), which differs from the 1997 paper, most importantly in
-using true day length from latitude. The previous repository used Chuter's form
-(M1).
+using true day length from latitude. The official code (`ACM.c`) runs exactly
+this form (D21).
 
 In solve order:
 
@@ -189,19 +200,21 @@ Notes:
 - Temperature reaches GPP only through `e^(a8 Tmax)` (B3) and the range `Tr`
   (B1). Note B1 takes **half** the range; `Tr` itself is the full range.
 - The `+ 10` in B5: Chuter et al. count days from 21 December, not 1 January.
-  Without it, the whole season shifts 10 days late (M3).
+  Without it, the whole season shifts 10 days late. The code does the same (D23).
+- The code writes the declination as `-23.4 degrees x cos(...)`, which is the
+  same as `-0.408 radians x cos(...)`.
 - There is no water stress: `psi_d` and `R_tot` are fixed numbers.
 - There is no cold limit on spring photosynthesis (Stettz et al. 2022,
   `DECISIONS.md` F9).
 
-### 3.5 Not in the published model: frost cut-off
+### 3.5 Optional switch, off by default: frost cut-off
 
-The previous repository added one rule: no photosynthesis on days when
-`(Tmax + Tmin) / 2 < -2 degC`. Reason given: ACM was calibrated only between
-about 7 and 30 degC, and Hyytiala reaches about -25 degC; Williams et al. (1997)
-used a similar rule at their Oregon conifer sites. It is safe for the sampler
-because it depends only on the inputs, never on a parameter. Whether to keep it
-is open (M4).
+Not part of DALEC2 (not in the paper, not in the official code). The previous
+repository added it: no photosynthesis on days when `(Tmax + Tmin) / 2 < -2 degC`,
+because ACM was calibrated only between about 7 and 30 degC and Hyytiala reaches
+about -25 degC. The main model runs **without** it (D24). It stays available as
+a switch for one prior predictive check and one sensitivity run. It is safe for
+the sampler because it depends only on the inputs, never on a parameter.
 
 ## 4. Corrections to the published equations
 
@@ -210,12 +223,14 @@ re-checked against the PDF.
 
 1. **Allocation closure (Table 1, footnote 1).** The footnote gives
    `f_woo = 1 - f_auto - f_fol - f_lab`, leaving out `f_roo`. A1 to A4 and A10
-   show five uses of GPP, so the correct closure is
-   `f_auto + f_lab + f_fol + f_roo + f_woo = 1`. **Corrected.**
+   show five uses of GPP, so the closure used here is
+   `f_auto + f_lab + f_fol + f_roo + f_woo = 1`. The official code splits the
+   carbon step by step (foliage, then labile, then roots, wood takes the rest),
+   so the footnote is best read as a shorthand of that, not a different model.
+   **Handled by the Dirichlet split (D28).**
 2. **A8 uses `cr_fall` where `d_fall` is expected.** A7 is anchored on
-   `d_onset`; the matching form of A8 would be `doy - d_fall + psi_f`. As
-   printed, `d_fall` has no effect on anything, so its posterior would just equal
-   its prior. The previous repository kept the printed form. **Open (M5).**
+   `d_onset`; the official code anchors leaf fall on the leaf-fall day ("Fday").
+   As printed, `d_fall` would have no effect. **Corrected (D25).**
 3. **The text derivation writes `Phi_onset` where `Phi_fall` is meant.** Prose
    only; does not reach the code.
 4. **The same sentence mixes `cr_onset` and `cr_fall`.** Prose only.
@@ -251,7 +266,7 @@ two numbers). "Previous repository" says how the old code treated it.
 | 10 | `temperature_exponent` | Theta | how fast decomposition rises with temperature | degC-1 | 0.018 to 0.08 | B&W range | | |
 | 11 | `d_onset` | d_onset | day of leaf onset | day of year | 1 to 365 | uniform, B&W range (set by hand in one early run) | | |
 | 12 | `cr_onset` | cr_onset | length of the leaf-onset pulse | days | 10 to 100 | uniform, B&W range | | |
-| 13 | `d_fall` | d_fall | day of leaf fall | day of year | 1 to 365 | uniform, B&W range, but no effect as printed (M5) | | |
+| 13 | `d_fall` | d_fall | day of leaf fall | day of year | 1 to 365 | uniform, B&W range, but had no effect (printed A8); active now (D25) | | |
 | 14 | `cr_fall` | cr_fall | length of the leaf-fall pulse | days | 20 to 150 | uniform, B&W range | | |
 | 15 | `c_lf` | c_lf | share of needles shed per year | - | 1/8 to 1 | 0.20 to 0.33 (needles live 3 to 5 years) | | |
 | 16 | `lma` | c_lma | leaf carbon per leaf area | g C m-2 | 10 to 400 | 116 to 247, from site litterfall and LAI | | |
@@ -271,6 +286,13 @@ were written to cover forests worldwide, so they are far too wide for one site.
 This is exactly what the prior predictive check (Gelman 2.4) is meant to catch,
 and it is why each prior needs its own decision here.
 
+**The official code uses some different ranges** (Bloom et al. 2016 version):
+`f_auto` 0.2 to 0.8; `f_fol` 0.01 to 0.5 and `f_lab` 0.01 to 0.5 as shares of
+NPP, `f_roo` 0.01 to 1 of what remains; leaf lifespan 1.001 to 8 years; `ceff`
+5 to 50; `lma` 5 to 200 g C m-2 (from Kattge et al. 2011); onset and fall days
+365.25 to 1461 on the continuous counter; starting pools from 1 g C m-2. Useful
+in step 3.
+
 **Candidate scales (to decide in step 2).** Only a starting point:
 - rates (`theta_...`) and pool sizes: log scale, because their ranges span 2 to
   4 powers of ten;
@@ -278,55 +300,59 @@ and it is why each prior needs its own decision here.
   which also fixes correction 1;
 - days and periods: plain scale within their bounds.
 
-## 7. Fixed ACM coefficients
+## 7. Fixed ACM coefficients (D22)
 
-From Chuter et al. (2015). They are fitted per site, not universal. The previous
-repository used the **Loobos** set (evergreen forest, 52 N) as the closest
-match; neither published set is boreal (M2). Values copied from the previous
-repository and to be checked against Chuter et al., Appendix A.
+Fixed inside DALEC2 itself: they are the same numbers in every run of the
+official code (`DALEC_400.c`). They equal the "Loobos" set of Chuter et al.
+(2015, Appendix A; evergreen forest, 52 N). The previous repository used the
+same set, rounded. They were not fitted for a boreal forest: stated limitation.
 
-| Coefficient | Loobos (used before) | Oregon pine (reference) | Role |
+| Coefficient | DALEC2 value (used) | Previous repository (rounded) | Role |
 |---|---|---|---|
-| a2 | 0.0156 | 0.0142 | day-length slope |
-| a3 | 4.22273 | 0.980 | CO2 compensation point |
-| a4 | 208.868 | 217.9 | CO2 half-saturation point |
-| a5 | 0.0453 | 0.155 | day-length offset |
-| a6 | 0.3783 | 2.653 | hydraulic resistance coefficient |
-| a7 | 7.1929 | 4.309 | maximum light-use efficiency |
-| a8 | 0.0111 | 0.060 | temperature coefficient (on Tmax) |
-| a9 | 2.1001 | 1.062 | LAI coefficient of light-use efficiency |
-| a10 | 0.7897 | 0.0006 | exponent on water potential |
-| psi_d | 2.0 | 0.8502 | soil-to-leaf water potential difference (MPa) |
+| a2 | 0.0156935 | 0.0156 | day-length slope |
+| a3 | 4.22273 | 4.22273 | CO2 compensation point |
+| a4 | 208.868 | 208.868 | CO2 half-saturation point |
+| a5 | 0.0453194 | 0.0453 | day-length offset |
+| a6 | 0.37836 | 0.3783 | hydraulic resistance coefficient |
+| a7 | 7.19298 | 7.1929 | maximum light-use efficiency |
+| a8 | 0.011136 | 0.0111 | temperature coefficient (on Tmax) |
+| a9 | 2.1001 | 2.1001 | LAI coefficient of light-use efficiency |
+| a10 | 0.789798 | 0.7897 | exponent on water potential |
+| psi_d | -2.0 (MPa) | 2.0 | soil-to-leaf water potential difference; B1 uses its size |
 | R_tot | 1.0 | 1.0 | total hydraulic resistance |
 
-## 8. Open model choices
+## 8. Model-structure choices (decided 2026-10-13)
 
-To decide one by one before the priors. Each gets an entry in `DECISIONS.md`.
-
-| ID | Question | Previous repository | Notes |
+| ID | Question | Decision | Entry |
 |---|---|---|---|
-| M1 | Which ACM form: Chuter et al. (2015) or Williams et al. (1997)? | Chuter | The 1997 form has no latitude in its day length, which overstates winter GPP at 62 N by up to 12 times. Chuter's form is assumed to be what DALEC2 uses; the papers cannot fully confirm this. |
-| M2 | Which ACM coefficient set? | Loobos | Neither set is boreal; a stated limitation either way. |
-| M3 | Count days from 21 December in B5 (`doy + 10`)? | yes | Follows Chuter et al. Section II.A. |
-| M4 | Keep the frost cut-off (no GPP below -2 degC mean)? | yes | Not in Bloom and Williams. Interacts with the Stettz et al. (2022) finding. |
-| M5 | A8: keep `cr_fall` as printed, or correct to `d_fall`? | kept as printed | As printed, `d_fall` does nothing and must not be reported as "unidentifiable". |
-| M6 | Phenology at an evergreen site: which of `d_onset`, `cr_onset`, `d_fall`, `cr_fall`, `c_lf` are fitted, and which fixed? | sampled over B&W ranges (`c_lf` narrowed to 3 to 5 year needle life) | NEE alone may say little about leaf timing in an evergreen stand (RQ1, RQ3). A range of 1 to 365 days for `d_onset` lets leaves appear in midwinter. |
-| M7 | Starting pools: sample them, or derive them from site measurements? | derived (Ilvesniemi et al. 2009 site data) | Directly affects the prior predictive check. |
-| M8 | Allocation: Dirichlet simplex? | yes, weights from site data | Listed as locked in the project notes; to be re-assessed like everything else. |
-| M9 | LAI convention for `lma` (hemisurface or projected leaf area)? | both kept as a sensitivity run | Changes the `lma` range by about 25%. |
+| M1 | ACM form | Chuter et al. (2015) form, as in the official code | D21 |
+| M2 | ACM coefficients | DALEC2's fixed constants, full precision | D22 |
+| M3 | Day count for the declination | from 21 December (`doy + 10`) | D23 |
+| M4 | Frost cut-off | off in the main model; switch for one sensitivity run | D24 |
+| M5 | A8 anchor | corrected to `d_fall` | D25 |
+| M6 | Phenology parameters | all five fitted, site-based ranges (step 3) | D26 |
+| M7 | Starting pools | sampled, priors centred on site measurements (step 3) | D27 |
+| M8 | Allocation | `f_auto` plus a Dirichlet split | D28 |
+| M9 | LAI convention for `lma` | decided with the `lma` prior (step 3) | D29 |
+| M10 | Time counter for phenology | continuous day counter `t` | D30 |
 
 ## 9. Still to check against the original papers
 
 - Every equation in Section 3 against Bloom and Williams (2015) Appendix A and
   Chuter et al. (2015) Appendix B, including the A9 exponent (Section 3.3).
+  The structure already matches the official code; the check is for the
+  thesis text and citations.
 - The four corrections in Section 4.
-- The ACM coefficients in Section 7 against Chuter et al. Appendix A and D.
+- The ACM coefficients in Section 7 against Chuter et al. Appendix A (they
+  already match the code).
 - The previous repository's site numbers (litterfall, soil carbon, LAI) against
   Ilvesniemi et al. (2009) and Kolari (2010), before they are used in priors.
 
 ## References
 
+- Bloom, A. A., Exbrayat, J.-F., van der Velde, I. R., Feng, L. and Williams, M. (2016). The decadal state of the terrestrial carbon cycle: global retrievals of terrestrial carbon allocation, pools, and residence times. PNAS 113(5), 1285-1290.
 - Bloom, A. A. and Williams, M. (2015). Constraining ecosystem carbon dynamics in a data-limited world. Biogeosciences 12, 1299-1315.
+- CARDAMOM framework, DALEC2 source code: github.com/CARDAMOM-framework/CARDAMOM, `C/projects/CARDAMOM_MODELS/DALEC/DALEC_400/` and `DALEC_ALL/ACM.c`, `offset.c` (read 2026-10-13).
 - Chuter, A. M., Aston, P. J., Skeldon, A. C. and Roulstone, I. (2015). A dynamical systems analysis of the data assimilation linked ecosystem carbon (DALEC) models. Chaos 25(3), 036401.
 - Fox, A. et al. (2009). The REFLEX project. Agricultural and Forest Meteorology 149, 1597-1615.
 - Gelman, A. et al. (2020). Bayesian Workflow. arXiv:2011.01808.
