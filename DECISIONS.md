@@ -365,13 +365,19 @@ All log-normal, centred on Hyytiala measurements (Ilvesniemi et al. 2009, Fig. 6
 - **Diagnosis when a target is missed:** for every sampled quantity, the standardised difference between failing and passing draws on the prior's own scale (log, logit or plain); the largest ones point to the priors to revisit (D40, "if the check fails").
 - **The loader for model runs** (`load_record_with_drivers`, `load_model_block`) moved into `data_io.py`, shared by scripts 02 and 03.
 
-### D42. Prior predictive round 2: `ceff` prior (PROPOSED, 2026-10-13; awaiting the re-run)
+### D42. Prior predictive round 2: `ceff` prior (DECIDED 2026-10-13, after the re-run, F13)
 Following F12 and D40 ("change only the priors linked to failure, with a stated source"), only `ceff` changes in this round.
 - **New:** `ceff ~ LogNormal(median 10, sdlog 0.354)`, 95% 5 to 20. **Source:** the REFLEX DALEC model-data fusion experiment used a prior of 5 to 20 for the same ACM parameter ("nitrogen use efficiency parameter (a1) in ACM", Fox et al. 2009, Table 3; the previous repository cited it as Table 4). REFLEX includes an evergreen forest site.
 - **Replaces** D38's `LogNormal(16.5, 0.41)` (95% 7.4 to 37), which was built from `p11 x N` with an assumed needle N of 1 to 5 g N m-2.
 - **Honest tension:** a typical Scots pine needle N per area (about 1.2% N of dry mass on roughly 370 g dry mass m-2) would point to N near 4 and `ceff` near 30, i.e. higher, not lower. The prior predictive check says that, with DALEC2's fixed ACM coefficients (fitted at a temperate site, D22) and no cold limit (F9), such values make GPP implausibly high at Hyytiala. So `ceff` here acts as a site-level efficiency that also absorbs ACM's mismatch at a boreal site; it cannot be read as a physiological nitrogen value. This link between `ceff` and the fixed ACM coefficients is an identifiability point for RQ3.
 - **Gelman et al. (2020, Section 2.4)** allow priors to be revised after a prior predictive check, because no observations enter it; the revision must rest on outside knowledge (here a published prior), and both rounds are reported.
 - **Options not taken:** (B) setting `ceff` so that the implied annual GPP matches the site's plausible range (prior elicitation on an observable, also Section 2.4; rejected for now because the site GPP comes partly from the same tower); (C) keeping D38 and accepting the failure.
+
+### D43. Prior predictive round 3: `c_lf` prior narrowed to its source (PROPOSED, 2026-10-13; awaiting the re-run)
+- **New:** `c_lf ~ Beta(43.84, 122.84)`: mean 0.263, 95% 0.199 to 0.332, i.e. needle lifespan **3.0 to 5.0 years**.
+- **Replaces** D37's `Beta(14.51, 39.24)` (lifespan 2.5 to 6.2 years).
+- **Why:** `c_lf` is the only prior linked to both failure modes (F13). D37's prior was **wider than its own source**: Pensa and Jalkanen (1999) report mean needle retention of 3.4 to 4.2 years in southern Finland; 3 to 5 years covers that with a margin (the previous repository used the same 3 to 5 years). Narrowing a prior to what its source supports is outside knowledge, not tuning to the check (D40, Gelman et al. 2020, Section 2.4).
+- **Not changed in this round:** `lma` (linked to Tier 1, but its width reflects the unresolved LAI convention, D38); kept for round 4 if needed.
 
 ---
 
@@ -461,6 +467,15 @@ Implementation: the observation model is a config setting (`randunc_only` now; `
 - **Frost switch on (D24):** Tier 1 29.5%, Tier 2 37.8%; better, still failing.
 - **NEE seasonal cycle (Figure L, observed for context only):** winter and autumn match the observed cycle closely; summer observed values sit inside the middle half; **in spring nearly all prior draws turn to net uptake by early March, about six weeks before the observed cycle (mid-April)**. Because this appears across the whole prior, it is structural (no cold limit on photosynthesis; F9, Stettz et al. 2022), not something a prior can fix.
 - **Next (D40, "if the check fails"):** revisit only the canopy priors (`ceff` first, then `lma`, `c_lf`, allocation to leaves), each with a stated source.
+
+**F13. Prior predictive check, round 2 (only `ceff` changed, D42; real data, 2026-10-13).**
+- **Tier 1:** 9.3% impossible (round 1: 34.7%; target at most 5%), still FAIL. Daily GPP above 20: 7.7%; LAI above 12: 6.2%; annual GPP above 3,000: 3.2%.
+- **Tier 2:** 42.6% pass every check (round 1: 29.7%; target at least 50%), still FAIL. The weakest check is now the **foliage pool, end / start (55.7%)**, with many draws near 0: the canopy **collapses** in a fifth to a quarter of draws.
+- **Plausible draws, medians:** GPP 1,061 (site about 1,030: now matches), Rh 425 (site 290 to 370), NEE -68, peak LAI 3.1, foliage ratio 0.58, wood 1.28, soil 1.00.
+- **Links:** Tier 1 (runaway canopy): low `lma`, high `ceff`, low `c_lf`, low `f_auto`, high `f_lab` and `f_fol`. Tier 2 (mainly canopy collapse): high `c_lf` (+0.40) first.
+- **Reading:** the canopy is unstable in both directions. Needles are lost at rate `c_lf` and replaced by allocation `f_fol + f_lab` times GPP, which itself depends on leaf area (`C_fol / lma`) and `ceff`. These four priors are set independently, so some combinations replace needles faster than they fall (runaway) and others slower (collapse): the joint effect Gelman et al. (2020, Section 7.3) warn about. `c_lf` appears in both failure modes.
+- **Frost switch on:** Tier 1 6.9%, Tier 2 42.2%.
+- **Figure L:** winter and autumn still match; the spring early uptake remains (structural, F12); the prior median summer uptake (about -1.3) is now weaker than observed (about -3), but the observed values stay inside the 5 to 95% band.
 
 **F6. Evaluation block.** 608 of 1,461 evaluation days (41.6%) are excluded only because RANDUNC is missing: all of 2014 and the first half of 2011.
 

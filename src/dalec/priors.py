@@ -35,7 +35,7 @@ PRIORS: dict[str, tuple] = {
     "cr_onset": ("lognormal", 40.0, 0.35),
     "d_fall": ("normal", 265.0, 15.0),
     "cr_fall": ("lognormal", 60.0, 0.35),
-    "c_lf": ("beta", 14.51, 39.24),
+    "c_lf": ("beta", 43.84, 122.84),   # round 3 (D43): needle life 3 to 5 yr; was Beta(14.51, 39.24)
     # group 5: canopy (D38)
     "lma": ("lognormal", 185.0, 0.25),
     "ceff": ("lognormal", 10.0, 0.354),   # round 2 (D42): REFLEX range 5 to 20 as 95%; was median 16.5, sdlog 0.41

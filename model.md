@@ -284,7 +284,7 @@ two numbers). "Previous repository" says how the old code treated it.
 | 12 | `cr_onset` | cr_onset | length of the leaf-onset pulse | days | 10 to 100 | uniform, B&W range | log | LogNormal, median 40, sdlog 0.35, D37 |
 | 13 | `d_fall` | d_fall | day of leaf fall | day of year | 1 to 365 | uniform, B&W range, but had no effect (printed A8); active now (D25) | plain | Normal(265, 15), D37 |
 | 14 | `cr_fall` | cr_fall | length of the leaf-fall pulse | days | 20 to 150 | uniform, B&W range | log | LogNormal, median 60, sdlog 0.35, D37 |
-| 15 | `c_lf` | c_lf | share of needles shed per year | - | 1/8 to 1 | 0.20 to 0.33 (needles live 3 to 5 years) | interval | Beta(14.51, 39.24), D37 |
+| 15 | `c_lf` | c_lf | share of needles shed per year | - | 1/8 to 1 | 0.20 to 0.33 (needles live 3 to 5 years) | interval | Beta(43.84, 122.84), D43 (round 3; was Beta(14.51, 39.24), D37) |
 | 16 | `lma` | c_lma | leaf carbon per leaf area | g C m-2 | 10 to 400 | 116 to 247, from site litterfall and LAI | log | LogNormal, median 185, sdlog 0.25, D38 |
 | 17 | `ceff` | c_eff | canopy efficiency | - | 10 to 100 | 5 to 20 (REFLEX, Fox et al. 2009) | log | LogNormal, median 10, sdlog 0.354, D42 (round 2; was median 16.5, D38) |
 | 18 | `c_lab_0` | C_lab(0) | starting labile pool | g C m-2 | 20 to 2000 | derived from site litterfall | log | LogNormal, median 77, sdlog 0.50, D39 |
