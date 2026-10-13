@@ -1,5 +1,6 @@
 paths:
   fluxnet_dd: data/raw/FLX_FI-Hyy_FLUXNET2015_FULLSET_DD_1996-2014_1-4.csv
+  fluxnet_hh: data/raw/FLX_FI-Hyy_FLUXNET2015_FULLSET_HH_1996-2014_1-4.csv   # half-hourly, for daily max and min temperature
   figures: figures
 
 years:
@@ -16,6 +17,32 @@ data:
   missing_value: -9999
   qc_threshold: 0.75      # see DECISIONS.md D5: within 0.5-0.8 used in literature
 
+# Everything DALEC2 reads to step forward one day (DECISIONS.md D19). Nothing else.
+# Not in this list on purpose: VPD_F and P_F (DALEC2 has no water cycle), soil
+# temperature, and every other column. Day of year comes from the date, and
+# latitude (61.85 N) is a fixed site constant. Daily TA_F is not an input either:
+# it is read only to check the half-hourly file (D20).
+drivers:
+  model:                  # read straight from the daily file
+    sw_in: SW_IN_F        # W m-2 daily mean; the model needs MJ m-2 d-1 (x 0.0864)
+    co2: CO2_F_MDS        # umol mol-1 (ppm)
+  temperature_extremes:   # daily max and min air temperature, from the half-hourly file (D18)
+    hh_timestamp: TIMESTAMP_START   # start of each half-hour, written as YYYYMMDDHHMM
+    hh_column: TA_F                 # half-hourly air temperature, degC, gap-filled
+    t_max: t_max                    # name of the new daily column: highest half-hour of the day
+    t_min: t_min                    # name of the new daily column: lowest half-hour of the day
+    t_mid: t_mid                    # name of the new daily column: (t_max + t_min) / 2, drives respiration (D20)
+    daily_check_column: TA_F        # daily-file mean temperature; used ONLY for the check below
+    half_hours_per_day: 48          # a full day; days with fewer valid half-hours get NaN
+    mean_tolerance: 0.05            # degC; half-hourly mean must match the daily TA_F this closely
+
 eda:
   figure_formats: [pdf, png]   # pdf for the thesis, png for quick viewing
   figure_dpi: 300
+  smoothing_days: 15           # moving-average window for the NEE seasonal cycle (Figure G)
+  onset_run_days: 10           # spring onset = first day of this many days in a row of net uptake
+  spring_months: [3, 4, 5]     # meteorological spring (MAM), highlighted in Figure I
+  figure_only_columns:         # shown in figures for context; never passed to the model
+    sw_in_potential: SW_IN_POT       # sunlight with no atmosphere; shows cloudiness (Figure H)
+    soil_temperature_prefix: TS_F_MDS_   # layers _1 (shallowest) to _5; Figure I uses _1
+  max_lag_days: 30             # longest gap shown in the autocorrelation figure (Figure K)

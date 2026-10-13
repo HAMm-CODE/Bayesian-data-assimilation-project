@@ -7,7 +7,7 @@ Each entry is marked with a status:
 - **Proposed**: preferred option chosen, not yet final.
 - **Open**: still to be decided; the options are recorded.
 
-Last updated: 2026-10-08.
+Last updated: 2026-10-12.
 
 ---
 
@@ -91,6 +91,7 @@ Last updated: 2026-10-08.
 - Chosen definition: meteorological seasons, DJF (December to February), MAM (March to May), JJA (June to August), SON (September to November).
 - No current figure groups by season: the monthly box plots (Figure C) and the annual cycle (Figure E) show the seasonal pattern month by month and day by day instead. The `seasons` block was therefore removed from the config, because a setting nothing reads is misleading. Restore it if a later figure needs seasons.
 - Stated limitation if used later: at Hyytiala (62 N) winter lasts longer than December to February.
+- Exception: Figure I highlights meteorological spring (March to May), set in the config as `eda.spring_months`.
 
 ### D9. Missing values and file checks (Decided)
 
@@ -142,6 +143,84 @@ Last updated: 2026-10-08.
   - Figure A uses **every day** of the calibration block, because it shows what is excluded and missing.
   - Figures B to E use **assimilable days only**, because those are what the likelihood sees.
 - Removed by the author's choice: the season weight-share figure and the QC sensitivity figure. The QC sensitivity numbers remain recorded in D5.
+
+### D16. Data and driver figures (Decided, 2026-10-08)
+
+Script `scripts/02_data_eda.py`, separate from the sigma figures because it is about NEE and the drivers.
+
+**Drivers shown: the ones DALEC2 reads (Figure H), plus shallow soil temperature in Figure I.** The model keeps its current drivers. A figure of every other driver in the file (VPD, precipitation, radiation components, wind, pressure, soil water and so on) was built and then removed by the author's choice, to keep the EDA focused. Adding a driver to the model would mean new equations, and VPD would reverse an inherited decision, so that stays future work.
+
+Drivers DALEC2 reads: daily highest and lowest air temperature (from the half-hourly file, see D18) and their midpoint for respiration (D20), incoming shortwave radiation (`SW_IN_F`, converted from W m-2 to MJ m-2 d-1 by x 0.0864), atmospheric CO2 (`CO2_F_MDS`), day of year, and site latitude (61.85 N, fixed). Listed in the config under `drivers`; the full input list and the reason for each is D19.
+
+The figures:
+
+- **F. Data availability:** one row per year of the **whole record (1996 to 2014)**, one column per day, each day coloured as assimilable, QC below threshold, or QC passes but RANDUNC missing. Lines and labels mark the excluded year, the calibration block and the evaluation block. Whole record chosen so the figure shows why 1996 is excluded and why 2014 has no assimilable days.
+- **G. NEE seasonal cycle:** one thin line per year, **calibration years and evaluation years in different colours**, with the calibration median on top. This replaces a separate calibration-versus-evaluation figure: it shows directly whether the evaluation years behave like the calibration years. Uses **QC-passing days** (sigma is not needed to describe NEE's shape; requiring it would remove 2014 entirely). Each line is a 15-day centred moving average (`eda.smoothing_days`).
+- **Spring onset (in G):** first day of **10 days in a row with net uptake (NEE < 0)** on QC-passing days (`eda.onset_run_days`), computed per year. A day that fails QC breaks the run, so a data gap can delay the onset but never create one. Same definition as the previous repository. G shows the median onset of the calibration years and their range.
+- **H. Model drivers:** air temperature (daily highest, mean and lowest; medians per day of year), incoming sunlight (median and middle half, plus potential sunlight with no atmosphere, which shows cloudiness), and CO2 as a time series (its upward trend is larger than its seasonal swing).
+- **I. NEE against drivers:** NEE against incoming sunlight, air temperature and shallowest soil temperature, **spring days highlighted**. Spring is where light and temperature separate (light is already strong while air and soil are cold), so it tests which one limits uptake, and it is where DALEC2's onset is wrong (Stettz et al. 2022; Suni et al. 2003; Makela et al. 2004). Uses QC-passing days of the calibration block.
+- **K. Day-to-day dependence:** autocorrelation of NEE **anomalies** (NEE minus the typical NEE for that day of the year) for gaps of 1 to 30 days, on assimilable calibration days. Removing the seasonal cycle first is necessary; otherwise "summer follows summer" looks like day-to-day dependence. Tests the likelihood's assumption that days are independent. The grey band shows the range expected if days were independent.
+
+### D17. Shared plotting module (Decided, 2026-10-08)
+
+- Figure style, colours, the 365-day calendar (29 February dropped), the per-day climatology (median and middle half) and the wrap-around smoothing live in `src/dalec/plotting.py`, used by both EDA scripts. One definition, so the two scripts cannot drift apart.
+
+### D18. Daily highest and lowest temperature from the half-hourly file (Decided, 2026-10-12; closes OPEN-4)
+
+**Why.** DALEC2's photosynthesis part (ACM) uses the daily temperature range (highest minus lowest). The daily FLUXNET file has no daily highest or lowest temperature. The daytime and night-time means (`TA_F_DAY`, `TA_F_NIGHT`) are averages over many hours, so they sit closer together than the true extremes; the previous repository found they understate the range by about 4.8 C. So the extremes are taken from the half-hourly file, as the previous repository did.
+
+**How** (`daily_temperature_extremes` and `attach_temperature_extremes` in `src/dalec/data_io.py`; settings under `drivers.temperature_extremes` in the config):
+
+- Read only two columns of the half-hourly file: `TIMESTAMP_START` and `TA_F` (gap-filled air temperature).
+- Each half-hour belongs to the calendar day of its start time. Same rule as FLUXNET's own daily file, so the days line up.
+- Daily highest = largest of the 48 half-hours; daily lowest = smallest. Stored as `t_max` and `t_min`.
+- A day needs all 48 half-hours. With fewer, the true highest or lowest might be the missing one, so the day gets NaN instead of a partial answer. The count of valid half-hours is kept (`t_half_hours_valid`) and Figure H prints how many days are short.
+- The run stops (fail loudly) if: a half-hour appears twice; a day has more than 48 half-hours; a date of the daily file is missing from the half-hourly file; on full days the mean of the half-hours differs from the daily `TA_F` by more than 0.05 C; or the daily mean lies outside the lowest-to-highest range. The mean check proves both files are the same version and the dates are not shifted.
+- `TA_F_DAY` and `TA_F_NIGHT` are no longer used.
+
+**Tested** on made-up data: correct extremes, one incomplete day set to NaN, and every check above raises an error when it should. Still to confirm on the real files.
+
+### D19. Model inputs: only what DALEC2 reads (Decided, 2026-10-12)
+
+**Rule.** The model receives only the inputs its equations use. Every extra column would either do nothing or need new equations and new parameters, which makes the parameters harder to pin down (identifiability).
+
+| Input | Source | Where DALEC2 uses it |
+|---|---|---|
+| Respiration temperature | (highest + lowest) / 2, from the two rows below (D20) | Speed of decomposition and respiration (`exp(Theta * T)`) |
+| Daily highest air temperature | half-hourly `TA_F` (D18) | Photosynthesis (ACM `exp(a8 * Tmax)` term); frost check |
+| Daily lowest air temperature | half-hourly `TA_F` (D18) | Temperature range in canopy conductance (ACM); frost check |
+| Incoming sunlight | `SW_IN_F`, daily file, x 0.0864 to MJ m-2 d-1 | Light supply to photosynthesis (ACM) |
+| Atmospheric CO2 | `CO2_F_MDS`, daily file | Photosynthesis (ACM) |
+| Day of year | from the date, not a column | Leaf-on and leaf-off timing (phenology); day length |
+| Latitude 61.85 N | fixed site constant | Day length |
+
+**Not inputs, on purpose:**
+- `VPD_F` (air dryness) and `P_F` (precipitation). DALEC2 (Bloom and Williams 2015) has no water cycle; its ACM uses a fixed leaf water potential instead of a weather input. Adding them would mean new equations, so they stay future work. The old repository made the same choice ("No VPD"). Note: `research_plan_v2.md` still lists `VPD_F` and should be corrected.
+- `TA_F_DAY` and `TA_F_NIGHT`: replaced by true extremes (D18).
+- Daily `TA_F`: read only to check the half-hourly file (D18), never passed to the model (D20).
+- `SW_IN_POT` and soil temperature (`TS_F_MDS_1`): shown in Figures H and I for context only. They sit under `eda.figure_only_columns` in the config, so they cannot be mistaken for model inputs.
+
+**Checked against the literature (2026-10-12).** Bloom and Williams (2015, Appendix A) drive DALEC2 with "day of year, atmospheric CO2, minimum and maximum temperature, and global radiation", and state that "hydrological processes are not explicitly portrayed in the model". REFLEX (Fox et al. 2009, Table 1) uses the same four weather drivers, with the water terms of ACM "given a fixed value". VPD, wind speed and precipitation appear only in the later water-coupled ACM-GPP-ET (Smallman and Williams 2019), which also computes evaporation and is outside these research questions.
+
+### D20. Respiration temperature = midpoint of daily highest and lowest (Decided, 2026-10-12)
+
+**Choice.** The temperature in DALEC2's decomposition and respiration term is `t_mid = (t_max + t_min) / 2`, not the 24-hour mean `TA_F`.
+
+**Why.** Bloom and Williams (2015) list only minimum and maximum temperature among DALEC2's drivers (Appendix A), so any daily temperature the model uses must come from those two. Chuter et al. (2015), whose written-out DALEC equations are the ACM source this project uses, state it directly: "Tm(t) is the mean daily air temperature, which is the mean of the maximum and minimum daily temperatures."
+
+**What the literature does NOT say (checked 2026-10-12, correcting an earlier note).** The convention is not universal or explicit:
+- Bloom and Williams (2015) use `T_t` in equations A5, A6 and A10 but never define it.
+- Pinnington et al. (2016), DALEC2 at the Alice Holt flux site, say only "the daily mean temperature", without saying how it is computed.
+- Delahaies et al. (2017) do not define the daily temperature either (an earlier version of this entry wrongly credited them with the Chuter quote).
+- The previous repository used the 24-hour mean `TA_F` for respiration. D20 deliberately changes that.
+
+**Option not taken.** `TA_F`, the true average of 48 half-hours, is slightly more accurate physically and is a defensible reading of "daily mean temperature". It was not chosen because the only explicit definition found (Chuter et al. 2015) is the midpoint, and the DALEC2 driver list contains only minimum and maximum.
+
+**Size of the difference.** Figure H prints the average and spread of `t_mid - TA_F` on the real data, so the thesis can state how much this choice matters.
+
+**Daily `TA_F` is still read**, but only for the D18 safety check (`drivers.temperature_extremes.daily_check_column`).
+
+**Possible sensitivity check.** Because the two readings are both defensible, a short run with `TA_F` instead of `t_mid` would show whether the choice moves the posterior. Worth doing only if Figure H shows a sizeable difference.
 
 ---
 
@@ -208,6 +287,14 @@ Implementation: the observation model is a config setting (`randunc_only` now; `
 
 **F5. Missing RANDUNC.** 1,138 of 6,940 days (16.4%) in the full file have no RANDUNC, including all of 2014. Within the calibration block, 365 days lack it, spread over several gaps (to be shown in Figure A), not one whole year.
 
+**F7. Daily temperature extremes are not in the daily file (resolved by D18).** DALEC2's photosynthesis (ACM) uses the daily temperature range, but the FLUXNET daily file has no daily maximum or minimum. `TA_F_DAY` and `TA_F_NIGHT` are only stand-ins; the previous repository found they understate the range by about 4.8 C and derived true extremes from the half-hourly file. This is the one model input the daily file cannot supply directly.
+
+**F9. Temperature-related cautions from earlier DALEC users (literature, 2026-10-12).**
+- Bloom and Williams (2015) chose test sites "with a ≤ 3 months of recorded below-freezing soil temperatures" and little water stress, because "these criteria reflect the current capabilities of DALEC2". FI-Hyy, a boreal site, has a longer frozen season (the previous repository's notes say about four to six months of soil frost; to be confirmed from the soil temperature data). Using DALEC2 here is a deliberate scope choice and a stated limitation.
+- Stettz et al. (2022), DALEC2 at a subalpine evergreen forest (US-NR1), report that baseline DALEC2 has no cold-temperature control on spring photosynthesis: GPP is "limited primarily by incoming shortwave radiation". They added a scalar on daily minimum temperature (GPP gradually reduced below about 6.0 C, fully stopped below about -7.1 C), which improved spring GPP (r = 0.88 vs 0.47). This matches the early spring onset found in the previous repository and supports showing spring in Figure I.
+
+**F8. Driver completeness.** In the full record, the model drivers are complete except CO2 (0.3% empty, expected to be the 19 days at the start of 1996). Soil temperature and soil water are 1 to 5% empty; net radiation 21%, diffuse shortwave 46%, soil heat flux 46%, diffuse photosynthetic light 77%.
+
 **F6. Evaluation block.** 608 of 1,461 evaluation days (41.6%) are excluded only because RANDUNC is missing: all of 2014 and the first half of 2011.
 
 ---
@@ -215,6 +302,10 @@ Implementation: the observation model is a config setting (`randunc_only` now; `
 ## Part 5. Open items
 
 **OPEN-1. Evaluation mask.** Evaluation needs sigma only for probability-based checks (for example, predictive interval coverage). Error measures like RMSE need only NEE and QC. Using QC alone keeps 1,418 instead of 810 evaluation days (adds 2014 and early 2011). Decide when designing the evaluation chapter.
+
+**OPEN-3. Spring onset number.** The previous EDA found a median observed onset of day 96 (range 58 to 117) with the 10-day rule, while project notes mention an observed onset of day 110 in the model comparison. These probably come from different definitions or data. Pick one definition (D16 uses the 10-day rule) and use it consistently in the thesis.
+
+**OPEN-4. Daily temperature extremes (F7).** Closed 2026-10-12: derived from the half-hourly file (D18).
 
 ### Carried over from the previous repository, not yet re-assessed
 
@@ -225,7 +316,6 @@ These will be reviewed when the work reaches them:
 - No VPD driver.
 - NUTS as the only sampler.
 - ACM photosynthesis implemented from Chuter et al. (2015), not Williams et al. (1997).
-- Daily temperature extremes derived from the half-hourly file (the day/night proxy understated the range).
 - LAI convention (hemisurface vs projected) kept as a two-way sensitivity run.
 - `d_fall` inert as transcribed from Bloom and Williams (2015), equation A8.
 
@@ -234,16 +324,23 @@ These will be reviewed when the work reaches them:
 ## References
 
 - Bacour, C. et al. (2023). Assimilation of multiple datasets results in large differences in regional- to global-scale NEE and GPP budgets simulated by a terrestrial biosphere model. Biogeosciences 20, 1089-1111.
+- Bloom, A. A. and Williams, M. (2015). Constraining ecosystem carbon dynamics in a data-limited world: integrating ecological "common sense" in a model-data fusion framework. Biogeosciences 12, 1299-1315.
+- Chuter, A. M., Aston, P. J., Skeldon, A. C. and Roulstone, I. (2015). A dynamical systems analysis of the data assimilation linked ecosystem carbon (DALEC) models. Chaos 25(3), 036401. (Journal details from the previous repository; the quote in D20 was read from the manuscript at personalpages.surrey.ac.uk/a.skeldon/DALEC_paper.pdf, dated 8 December 2014. Check against the published article.)
+- Delahaies, S., Roulstone, I. and Nichols, N. (2017). Constraining DALEC v2 using multiple data streams and ecological constraints: analysis and application. Geoscientific Model Development 10, 2635-2650.
 - Douglas, et al. (2026). Regularisation of the 4DEnVar data assimilation method for calibration of land surface models. EGUsphere preprint.
 - Famiglietti, C. A. et al. (2021). Optimal model complexity for terrestrial carbon cycle prediction. Biogeosciences 18, 2727.
 - Fang, et al. Differentiable land model reveals global environmental controls on ecological parameters. arXiv:2411.09654.
 - Fer, I. et al. (2018). Linking big models to big data: efficient ecosystem model calibration through Bayesian model emulation. Biogeosciences 15, 5801.
+- Fox, A. et al. (2009). The REFLEX project: comparing different algorithms and implementations for the inversion of a terrestrial ecosystem model against eddy covariance data. Agricultural and Forest Meteorology 149, 1597-1615.
 - Gelman, A. et al. (2020). Bayesian Workflow. arXiv:2011.01808 (Section 10.5, pp. 53-54; Section 7.1).
 - Hollinger, D. Y. and Richardson, A. D. (2005). Uncertainty in eddy covariance measurements and its application to physiological models. Tree Physiology 25.
 - Kuppel, S. et al. (2012). Constraining a global ecosystem model with multi-site eddy-covariance data. Biogeosciences 9, 3757-3776.
 - Pastorello, G. et al. (2020). The FLUXNET2015 dataset and the ONEFlux processing pipeline for eddy covariance data. Scientific Data 7, 225.
 - Pu, et al. (2025). MCI GPP. Scientific Data.
+- Pinnington, E. M. et al. (2016). Investigating the role of prior and observation error correlations in improving a model forecast of forest carbon balance using Four-dimensional Variational data assimilation. Agricultural and Forest Meteorology 228-229, 299-314.
 - Richardson, A. D. et al. (2010). Estimating parameters of a forest ecosystem C model with measurements of stocks and fluxes as joint constraints. Oecologia 164, 25-40.
+- Smallman, T. L. and Williams, M. (2019). Description and validation of an intermediate complexity model for ecosystem photosynthesis and evapotranspiration: ACM-GPP-ETv1. Geoscientific Model Development 12, 2227-2253.
+- Stettz, S. G. et al. (2022). Resolving temperature limitation on spring productivity in an evergreen conifer forest using a model-data fusion framework. Biogeosciences 19, 541-558.
 - Tramontana, G. et al. (2016). Predicting carbon dioxide and energy fluxes across global FLUXNET sites with regression algorithms. Biogeosciences 13, 4291.
 - Williams, M. et al. (2009). Improving land surface models with FLUXNET data. Biogeosciences 6, 1341-1359.
 - Yuan, Q. et al. (2025). Global carbon flux dataset generated by fusing remote sensing and multiple flux networks observation. Scientific Data.

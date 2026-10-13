@@ -153,6 +153,129 @@ def screening_report(data: pd.DataFrame) -> pd.DataFrame:
     return report
 
 
+def daily_temperature_extremes(
+    path: str | Path,
+    *,
+    timestamp_column: str,
+    temperature_column: str,
+    half_hours_per_day: int = 48,
+    missing_value: float = -9999.0,
+) -> pd.DataFrame:
+    """Highest, lowest and mean half-hourly air temperature for each calendar day.
+
+    A day gets numbers only if all of its half-hours have a temperature
+    (48 values). With fewer, the highest or lowest value could be missing, so
+    the day is set to NaN instead of quietly using a partial day. The number of
+    valid half-hours is kept so that such days can be counted and shown.
+    """
+    csv_path = Path(path)
+    if not csv_path.is_file():
+        raise FileNotFoundError(
+            f"FLUXNET half-hourly file not found: {csv_path}\n"
+            "Expected the FULLSET half-hourly (HH) csv in data/raw/."
+        )
+
+    header = pd.read_csv(csv_path, nrows=0).columns
+    absent = [c for c in (timestamp_column, temperature_column) if c not in header]
+    if absent:
+        raise KeyError(
+            f"{csv_path.name} is missing columns {absent}. "
+            "Is this the FULLSET half-hourly file?"
+        )
+
+    # Only two of the 200+ columns are needed; reading just these keeps it fast.
+    frame = pd.read_csv(csv_path, usecols=[timestamp_column, temperature_column])
+    stamps = pd.to_datetime(
+        frame[timestamp_column].astype("int64").astype(str), format="%Y%m%d%H%M"
+    )
+    if stamps.duplicated().any():
+        example = stamps[stamps.duplicated()].iloc[0]
+        raise ValueError(f"the same half-hour appears twice, e.g. {example}")
+
+    temperature = frame[temperature_column].astype(float)
+    temperature = temperature.mask(
+        np.isclose(temperature, missing_value, rtol=0.0, atol=1e-6)
+    )
+
+    by_day = temperature.groupby(stamps.dt.normalize().to_numpy())
+    summary = pd.DataFrame({
+        "half_hours_valid": by_day.count(),
+        "t_max": by_day.max(),
+        "t_min": by_day.min(),
+        "t_mean_hh": by_day.mean(),
+    })
+    summary.index.name = "date"
+    summary = summary.sort_index()
+
+    too_many = summary["half_hours_valid"] > half_hours_per_day
+    if too_many.any():
+        raise ValueError(
+            f"{int(too_many.sum())} days have more than {half_hours_per_day} half-hours, "
+            f"e.g. {summary.index[too_many][0].date()}"
+        )
+
+    incomplete = summary["half_hours_valid"] < half_hours_per_day
+    summary.loc[incomplete, ["t_max", "t_min", "t_mean_hh"]] = np.nan
+    return summary
+
+
+def attach_temperature_extremes(
+    daily: pd.DataFrame,
+    extremes: pd.DataFrame,
+    *,
+    mean_column: str,
+    t_max_name: str,
+    t_min_name: str,
+    t_mid_name: str,
+    half_hours_per_day: int = 48,
+    mean_tolerance: float = 0.05,
+) -> pd.DataFrame:
+    """Add daily highest, lowest and midpoint temperature columns to the daily table.
+
+    The midpoint, (highest + lowest) / 2, is the temperature that drives
+    decomposition and respiration in DALEC2 (DECISIONS.md D20). `mean_column`
+    (the daily file's TA_F) is used only for the checks below, never as an input.
+
+    Two checks stop the run if the half-hourly and daily files disagree:
+    1. every daily date must exist in the half-hourly file;
+    2. on full days, the mean of the half-hours must match the daily mean
+       temperature, and the daily mean must lie between the lowest and highest.
+    A mismatch means the files are different versions or the dates are shifted.
+    """
+    absent = daily.index.difference(extremes.index)
+    if len(absent):
+        raise ValueError(
+            f"{len(absent)} days of the daily file are missing from the half-hourly file, "
+            f"e.g. {absent[0].date()}"
+        )
+    ext = extremes.reindex(daily.index)
+    full = (ext["half_hours_valid"] == half_hours_per_day) & daily[mean_column].notna()
+
+    gap = (ext["t_mean_hh"] - daily[mean_column]).abs()[full]
+    if len(gap) and gap.max() > mean_tolerance:
+        worst = gap.idxmax()
+        raise ValueError(
+            f"half-hourly mean differs from the daily {mean_column} by up to "
+            f"{gap.max():.3f} degC (on {worst.date()}); tolerance is {mean_tolerance}. "
+            "Check that both files are the same FLUXNET version and period."
+        )
+
+    mean = daily[mean_column][full]
+    outside = (mean < ext["t_min"][full] - mean_tolerance) | (mean > ext["t_max"][full] + mean_tolerance)
+    if outside.any():
+        raise ValueError(
+            f"daily mean temperature lies outside the half-hourly range on "
+            f"{int(outside.sum())} days, e.g. {outside.index[outside][0].date()}"
+        )
+
+    out = daily.copy()
+    out[t_max_name] = ext["t_max"]
+    out[t_min_name] = ext["t_min"]
+    out[t_mid_name] = 0.5 * (ext["t_max"] + ext["t_min"])
+    out["t_half_hours_valid"] = ext["half_hours_valid"].astype(int)
+    return out
+
+
 def load_screened_block(
     config: dict[str, Any] | None = None, *, block: str = "calibration"
 ) -> pd.DataFrame:

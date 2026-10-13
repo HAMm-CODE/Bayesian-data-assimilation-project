@@ -18,47 +18,17 @@ Run from the repository root:
 
 from typing import Any
 
-import matplotlib
-
-matplotlib.use("Agg")  # draw to files only, never open a window
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import stats
 
-from dalec.config import load_config, resolve_path, year_block
+from dalec.config import load_config, year_block
 from dalec.data_io import MASK_USE, load_screened_block, screening_report
-
-UNIT = "g C m$^{-2}$ d$^{-1}$"
-
-COLOUR_MAIN = "#2a78d6"      # blue: the data
-COLOUR_LINE = "#0b0b0b"      # near-black: lines drawn on top of the data
-COLOUR_EXCLUDED = "#a9a8a2"  # neutral grey: present but excluded
-COLOUR_GAP = "#e6e5e0"       # light grey band: RANDUNC missing
-MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def apply_style() -> None:
-    """Quiet, print-friendly defaults for every figure."""
-    plt.rcParams.update({
-        "figure.dpi": 100,
-        "font.size": 9,
-        "axes.titlesize": 10,
-        "axes.labelsize": 9,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-        "axes.grid": True,
-        "axes.axisbelow": True,  # grid behind the data, never on top
-        "grid.color": "#e6e5e0",
-        "grid.linewidth": 0.6,
-        "legend.frameon": False,
-        "legend.fontsize": 8,
-    })
+from dalec.plotting import (
+    BLUE, GREY, GREY_LIGHT, INK, MONTHS, UNIT_FLUX,
+    apply_style, climatology, heading, save_figure, set_year_axis,
+)
 
 
 def missing_runs(is_missing: pd.Series) -> pd.DataFrame:
@@ -73,34 +43,6 @@ def missing_runs(is_missing: pd.Series) -> pd.DataFrame:
         "end": dates[ends].date,
         "days": ends - starts + 1,
     })
-
-
-def day_of_year_365(index: pd.DatetimeIndex) -> pd.Series:
-    """Day of year on a 365-day calendar: 29 February is dropped (NaN).
-
-    In leap years every day after 28 February moves back by one, so that
-    1 March is always day 60 and 31 December is always day 365.
-    """
-    doy = pd.Series(index.dayofyear, index=index, dtype=float)
-    after_feb = index.is_leap_year & (index.month > 2)
-    doy[after_feb] -= 1
-    doy[(index.month == 2) & (index.day == 29)] = np.nan
-    return doy
-
-
-def save_figure(fig: plt.Figure, name: str, config: dict[str, Any]) -> None:
-    """Save one figure in every format listed in the config."""
-    out_dir = resolve_path(config["paths"]["figures"])
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for fmt in config["eda"]["figure_formats"]:
-        path = out_dir / f"{name}.{fmt}"
-        fig.savefig(path, dpi=config["eda"]["figure_dpi"], bbox_inches="tight")
-        print(f"  saved {path}")
-    plt.close(fig)
-
-
-def heading(text: str) -> None:
-    print(f"\n{'=' * 70}\n{text}\n{'=' * 70}")
 
 
 # ---------------------------------------------------------------------------
@@ -127,16 +69,16 @@ def figure_a(data: pd.DataFrame, config: dict[str, Any]) -> None:
     fig, ax = plt.subplots(figsize=(10, 3.4))
     for _, run in runs.iterrows():
         ax.axvspan(pd.Timestamp(run["start"]), pd.Timestamp(run["end"]) + pd.Timedelta(days=1),
-                   color=COLOUR_GAP, lw=0, zorder=0)
-    ax.scatter(sigma.index[excluded], sigma[excluded], s=4, color=COLOUR_EXCLUDED,
+                   color=GREY_LIGHT, lw=0, zorder=0)
+    ax.scatter(sigma.index[excluded], sigma[excluded], s=4, color=GREY,
                lw=0, label="RANDUNC present, excluded (QC below threshold)", zorder=2)
-    ax.scatter(sigma.index[use], sigma[use], s=4, color=COLOUR_MAIN,
+    ax.scatter(sigma.index[use], sigma[use], s=4, color=BLUE,
                lw=0, label="assimilable", zorder=3)
-    ax.fill_between([], [], color=COLOUR_GAP, label="RANDUNC missing")  # legend entry only
+    ax.fill_between([], [], color=GREY_LIGHT, label="RANDUNC missing")  # legend entry only
 
     start, end = year_block(config, "calibration")
     ax.set_title(f"Daily random uncertainty of NEE (RANDUNC), FI-Hyy {start}-{end}")
-    ax.set_ylabel(f"RANDUNC ({UNIT})")
+    ax.set_ylabel(f"RANDUNC ({UNIT_FLUX})")
     ax.set_xlim(pd.Timestamp(start, 1, 1), pd.Timestamp(end, 12, 31))
     ax.set_ylim(bottom=0)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncols=3, markerscale=3)
@@ -152,14 +94,13 @@ def figure_b(sigma: pd.Series, abs_nee: pd.Series, config: dict[str, Any]) -> No
     slope, intercept = np.polyfit(abs_nee, sigma, deg=1)
 
     fig, ax = plt.subplots(figsize=(5.5, 4.2))
-    ax.scatter(abs_nee, sigma, s=6, color=COLOUR_MAIN, alpha=0.35, lw=0,
-               label="assimilable days")
+    ax.scatter(abs_nee, sigma, s=6, color=BLUE, alpha=0.35, lw=0, label="assimilable days")
     xs = np.linspace(0, abs_nee.max(), 50)
-    ax.plot(xs, intercept + slope * xs, color=COLOUR_LINE, lw=1.5, label="straight trend line")
+    ax.plot(xs, intercept + slope * xs, color=INK, lw=1.5, label="straight trend line")
 
     ax.set_title("RANDUNC against the size of the daily flux")
-    ax.set_xlabel(f"|NEE| ({UNIT})")
-    ax.set_ylabel(f"RANDUNC ({UNIT})")
+    ax.set_xlabel(f"|NEE| ({UNIT_FLUX})")
+    ax.set_ylabel(f"RANDUNC ({UNIT_FLUX})")
     ax.set_xlim(left=0)
     ax.set_ylim(bottom=0)
     ax.legend(loc="upper left")
@@ -190,16 +131,16 @@ def figure_c(sigma: pd.Series, config: dict[str, Any]) -> None:
         tick_labels=MONTHS,
         widths=0.6,
         patch_artist=True,
-        boxprops={"facecolor": COLOUR_MAIN, "edgecolor": COLOUR_MAIN, "alpha": 0.85},
+        boxprops={"facecolor": BLUE, "edgecolor": BLUE, "alpha": 0.85},
         medianprops={"color": "white", "linewidth": 1.5},
-        whiskerprops={"color": COLOUR_MAIN},
-        capprops={"color": COLOUR_MAIN},
-        flierprops={"marker": "o", "markersize": 2, "markerfacecolor": COLOUR_EXCLUDED,
+        whiskerprops={"color": BLUE},
+        capprops={"color": BLUE},
+        flierprops={"marker": "o", "markersize": 2, "markerfacecolor": GREY,
                     "markeredgewidth": 0},
     )
     start, end = year_block(config, "calibration")
     ax.set_title(f"RANDUNC by calendar month, all years {start}-{end}")
-    ax.set_ylabel(f"RANDUNC ({UNIT})")
+    ax.set_ylabel(f"RANDUNC ({UNIT_FLUX})")
     ax.set_ylim(bottom=0)
     ax.grid(axis="x", visible=False)
     save_figure(fig, "fig_C_sigma_by_month", config)
@@ -219,19 +160,18 @@ def figure_d(sigma: pd.Series, config: dict[str, Any]) -> None:
           f"5th-95th percentile {np.percentile(values, 5):.3f} to {np.percentile(values, 95):.3f}")
 
     fig, ax = plt.subplots(figsize=(5.5, 3.8))
-    ax.hist(values, bins=60, density=True, color=COLOUR_MAIN, alpha=0.45,
+    ax.hist(values, bins=60, density=True, color=BLUE, alpha=0.45,
             edgecolor="white", linewidth=0.3, label="histogram")
     # Draw the curve only between the smallest and largest observed value:
     # smoothing would otherwise show density below the minimum, where no data exist.
     xs = np.linspace(values.min(), values.max(), 400)
-    ax.plot(xs, stats.gaussian_kde(values)(xs), color=COLOUR_LINE, lw=1.5,
-            label="smoothed density")
-    ax.axvline(median, color=COLOUR_LINE, lw=1, ls=":")
+    ax.plot(xs, stats.gaussian_kde(values)(xs), color=INK, lw=1.5, label="smoothed density")
+    ax.axvline(median, color=INK, lw=1, ls=":")
     ax.text(median, 0.98, f" median {median:.2f}", transform=ax.get_xaxis_transform(),
             va="top", ha="left", fontsize=8)
 
     ax.set_title("How often each RANDUNC value occurs")
-    ax.set_xlabel(f"RANDUNC ({UNIT})")
+    ax.set_xlabel(f"RANDUNC ({UNIT_FLUX})")
     ax.set_ylabel("density")
     ax.set_xlim(left=0)
     ax.legend(loc="upper right")
@@ -249,35 +189,24 @@ def figure_e(sigma: pd.Series, config: dict[str, Any]) -> None:
     large values would pull a mean upwards. The band shows the middle half of
     the values (25th to 75th percentile) for each day.
     """
-    doy = day_of_year_365(sigma.index)
-    keep = doy.notna()
-    by_day = sigma[keep].groupby(doy[keep])
-    cycle = pd.DataFrame({
-        "median": by_day.median(),
-        "q25": by_day.quantile(0.25),
-        "q75": by_day.quantile(0.75),
-        "years": by_day.size(),
-    })
+    cycle = climatology(sigma)
 
     heading("Figure E: annual cycle of RANDUNC (assimilable days)")
-    print(f"  years contributing per day: min {int(cycle['years'].min())}, "
-          f"max {int(cycle['years'].max())}")
+    print(f"  years contributing per day: min {int(cycle['n'].min())}, max {int(cycle['n'].max())}")
     low, high = cycle["median"].idxmin(), cycle["median"].idxmax()
     print(f"  lowest median  {cycle['median'].min():.3f} on day {int(low)}")
     print(f"  highest median {cycle['median'].max():.3f} on day {int(high)}")
 
     fig, ax = plt.subplots(figsize=(7, 3.8))
-    ax.fill_between(cycle.index, cycle["q25"], cycle["q75"], color=COLOUR_MAIN, alpha=0.25,
+    ax.fill_between(cycle.index, cycle["q25"], cycle["q75"], color=BLUE, alpha=0.25,
                     lw=0, label="middle half of values (25th to 75th percentile)")
-    ax.plot(cycle.index, cycle["median"], color=COLOUR_MAIN, lw=1.5, label="median")
+    ax.plot(cycle.index, cycle["median"], color=BLUE, lw=1.5, label="median")
 
-    month_starts = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]
-    ax.set_xticks(month_starts, MONTHS)
-    ax.set_xlim(1, 365)
+    set_year_axis(ax)
     ax.set_ylim(bottom=0)
     start, end = year_block(config, "calibration")
     ax.set_title(f"Typical RANDUNC through the year, {start}-{end}")
-    ax.set_ylabel(f"RANDUNC ({UNIT})")
+    ax.set_ylabel(f"RANDUNC ({UNIT_FLUX})")
     ax.legend(loc="upper left")
     save_figure(fig, "fig_E_sigma_annual_cycle", config)
 
