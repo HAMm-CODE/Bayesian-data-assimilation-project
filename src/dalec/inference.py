@@ -120,15 +120,25 @@ def initial_values(raw: dict[str, np.ndarray], i: int) -> dict[str, Any]:
     return start
 
 
+MASS_MATRIX_INIT = {"diagonal": "adapt_diag", "dense": "adapt_full"}   # D49, D52
+
+
 def sample(model: pm.Model, starts: list[dict[str, Any]], *, draws: int, tune: int,
-           target_accept: float, seed: int, cores: int):
+           target_accept: float, seed: int, cores: int, mass_matrix: str = "diagonal"):
     """Run NUTS (D49): one chain per starting point, no random jitter on the start.
 
     PyMC normally shakes each starting point by up to a factor of e on the log
     scale ("jitter"). That could move a chain out of the plausible region the
-    start was chosen from, so it is switched off (init="adapt_diag").
+    start was chosen from, so it is switched off.
+
+    `mass_matrix` sets how the sampler learns the shape of the posterior during
+    warm-up: "diagonal" learns one scale per parameter (the validated setting,
+    F16); "dense" also learns how parameters move together (D52, speed test).
+    Neither changes the model, only how fast the sampler moves through it.
     """
+    if mass_matrix not in MASS_MATRIX_INIT:
+        raise ValueError(f"mass_matrix must be one of {tuple(MASS_MATRIX_INIT)}, got {mass_matrix!r}")
     with model:
         return pm.sample(draws=draws, tune=tune, chains=len(starts), cores=min(cores, len(starts)),
-                         initvals=starts, init="adapt_diag", target_accept=target_accept,
-                         random_seed=seed, progressbar=True)
+                         initvals=starts, init=MASS_MATRIX_INIT[mass_matrix],
+                         target_accept=target_accept, random_seed=seed, progressbar=True)

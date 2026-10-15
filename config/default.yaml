@@ -61,19 +61,28 @@ sampler:                       # NUTS settings, DECISIONS.md D49
   target_accept: 0.9           # PyMC default 0.8; higher = smaller, safer steps
   cores: 4                     # chains run side by side; set 1 if parallel runs fail
   seed: 20261014
+  mass_matrix: diagonal        # validated (F16); "dense" is the D52 speed test (--mass-matrix dense)
+  quick:                       # --quick in scripts 04 and 05: 2 years, short chains (runs, nothing judged)
+    years: 2
+    chains: 2
+    tune: 150
+    draws: 100
+
+diagnostics:                   # D49 criteria 1 to 3; a fit must pass these before results are read
+  max_rhat: 1.01
+  min_ess: 400                 # bulk and tail effective sample size, every quantity
 
 fake_data:                     # fake-data check, DECISIONS.md D48 and D49
   seed: 20261015
   n_candidates: 200            # prior draws searched for the true forest and the chain starts
   interval: 0.90               # posterior interval used for the "truth recovered" check
   min_covered: 20              # of the 24 sampled quantities, truth inside the interval
-  max_rhat: 1.01
-  min_ess: 400                 # bulk and tail effective sample size, every quantity
-  quick:                       # python scripts/04_fake_data_check.py --quick (runs, nothing judged)
-    years: 2
-    chains: 2
-    tune: 150
-    draws: 100
+
+fit:                           # real-data fit, DECISIONS.md D51
+  seed: 20261016               # chain starts (a different set of prior draws from the fake-data check)
+  n_candidates: 200
+  interval: 0.90               # posterior and predictive intervals
+  n_predictive_draws: 400      # posterior draws run forward for the posterior predictive checks
 
 eda:
   figure_formats: [pdf, png]   # pdf for the thesis, png for quick viewing

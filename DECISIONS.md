@@ -390,6 +390,7 @@ All log-normal, centred on Hyytiala measurements (Ilvesniemi et al. 2009, Fig. 6
 - **Diagnosis when a target is missed:** for every sampled quantity, the standardised difference between failing and passing draws on the prior's own scale (log, logit or plain); the largest ones point to the priors to revisit (D40, "if the check fails").
 - **The loader for model runs** (`load_record_with_drivers`, `load_model_block`) moved into `data_io.py`, shared by scripts 02 and 03.
 - **The D40 checks** (`TIER2_BANDS`, `summarise_batch`, `evaluate`) moved from script 03 into `src/dalec/plausibility.py` (2026-10-13), because the fake-data check (D48) uses them too. One definition, so the two scripts cannot drift apart (as D17).
+- **Shared fit steps** (chain starts, the prior-against-posterior table, sampler health, the D49 computation checks, the interval figure) moved from script 04 into `src/dalec/posterior.py` (2026-10-15), so the fake-data check and the real fits are judged the same way. Config: `diagnostics` holds the D49 thresholds and `sampler.quick` the quick-run settings for both scripts.
 
 ### D42. Prior predictive round 2: `ceff` prior (Decided, 2026-10-13, after the re-run, F13)
 Following F12 and D40 ("change only the priors linked to failure, with a stated source"), only `ceff` changes in this round.
@@ -474,10 +475,33 @@ Following F12 and D40 ("change only the priors linked to failure, with a stated 
 **If it fails:** look for the cause before changing anything (Gelman et al. 2020, Section 5): divergences point to geometry (then consider the D27 reparameterisation or a higher `target_accept`); a truth outside a narrow interval points to a bug or a non-identified pair; record every change here.
 
 ### D50. Where the fake-data check runs: Roihu, with the existing container (Decided, 2026-10-13)
-- **Roihu, partition `small`**, account `project_2020170`: one node, 4 CPUs (one per chain), 32 GB, time limit 24 h (`small` allows 72 h; only the time used is billed). Job scripts: `jobs/fake_data_quick.sbatch`, `jobs/fake_data_full.sbatch`, shared set-up `jobs/roihu_setup.sh`.
+- **Roihu, partition `small`**, account `project_2020170`: one node, 4 CPUs (one per chain), 32 GB, time limit 48 h (`small` allows 72 h; only the time used is billed). Raised from 24 h after the first full job timed out; the run took 29.4 h (F16). Job scripts: `jobs/fake_data_quick.sbatch`, `jobs/fake_data_full.sbatch`, shared set-up `jobs/roihu_setup.sh`.
 - **Python environment:** the Tykky container built for the previous repository (`/projappl/project_2020170/dalec-env`; Python 3.13, PyTensor 3.2.4, C++ compiler inside). Our code is not installed into it; it is found through `PYTHONPATH=src`, and the job stops if `dalec` would be loaded from anywhere else. **Checked:** all 53 tests pass with PyTensor 3.2.4. The PyMC and ArviZ versions in the container are printed at the start of every job.
 - **Why not a new container tonight:** building one takes time and the existing one already ran a model of the same size (3.9 h for 4 x 2,000 draws in the previous repository). A fresh container from `environment.yml` is the clean option before thesis results (D2, lock file).
 - **Order:** the quick job first; the full job is submitted with `--dependency=afterok`, so it starts only if the quick job finished without an error.
+
+### D51. The real-data fit (`scripts/05_fit_real_data.py`) (Decided, 2026-10-15)
+**What.** The model (D47) and sampler settings (D49) that passed the fake-data check (F16), fitted to the measured `NEE_VUT_REF` on the 4,413 assimilable days of 1997-2010. Chain starts: physically possible prior draws (D45) from a different seed than the fake-data check. Job: `jobs/fit_full.sbatch` (48 h), after `jobs/fit_quick.sbatch`.
+
+**Reading order, fixed before running.**
+1. **Computation first:** D49 criteria 1 to 3 (no divergences, R-hat below 1.01, effective sample size at least 400). If any fails, nothing else is interpreted until the cause is found.
+2. **Prior against posterior** for every parameter (Figure O, same table as F16 without a truth).
+3. **The forest the posterior implies:** annual GPP, autotrophic, heterotrophic and ecosystem respiration, NEE, peak LAI and the pool changes, next to the independent site values (RQ3). Also the share of posterior draws outside each D40 band.
+4. **Posterior predictive checks** (Gelman et al. 2020, Section 6.1): 400 posterior draws run forward, each with a fresh error of the size the likelihood assumes. Reported: the share of assimilable days whose observed NEE lies inside the 90% predictive interval (overall and by season), the average misfit by season, annual sums on assimilable days, the seasonal cycle (Figure P) and the monthly series (Figure Q). These are descriptive: nothing is tuned to them.
+
+**Expectations written down before seeing the results** (so they can be confirmed or refuted honestly):
+- **Spring misfit:** the model turns to net uptake too early in spring (F12, Stettz et al. 2022), so in March to May the observed NEE should sit above the model (observed minus model positive).
+- **Coverage below 90%:** RANDUNC covers measurement error only, not model error (L1), and days are not independent (F11), so the predictive interval is likely too narrow, most clearly where the model is structurally wrong (spring).
+- **Weakly identified pairs:** root pool and root turnover, soil pool and soil turnover, and the starting wood pool should be only partly or not informed (F16).
+
+**Sensitivity runs** use the same script with options (`--frost`, `--observation-model randunc_plus_model_error`, `--mass-matrix dense`); each writes its own files, so several can run at the same time on Roihu.
+
+### D52. Speed test: dense mass matrix on the fake data (Decided, 2026-10-15)
+**Why.** The fake-data fit took 29.4 h because nearly every draw used the maximum 1,023 gradient evaluations at a step size of about 0.005 (F16). A "mass matrix" is the sampler's learned picture of the posterior's shape. The validated setting ("diagonal") learns one scale per parameter; a "dense" one also learns how parameters move together, which can straighten out the sloping ridges of the pool and rate pairs and allow longer steps. With 23 parameters a dense matrix is cheap. It changes only how the sampler moves, not the model or the answer.
+
+**Test.** The same fake-data check (D48), same truth, seeds and starts, with `--mass-matrix dense` (PyMC `init="adapt_full"`), run on Roihu alongside the real-data fit.
+
+**Adopt dense for later runs only if all three hold** (fixed before running): (1) it passes all four D49 criteria; (2) it takes at least 30% less time than 29.4 h, i.e. at most about 20.5 h; (3) for every quantity, its posterior median differs from the diagonal run's by less than 10% of the diagonal run's 90% interval width. Otherwise the diagonal setting stays. The main real-data fit (D51) uses the validated diagonal setting either way.
 
 ## Part 3. Likelihood
 
@@ -602,6 +626,13 @@ Implementation (planned): the observation model will be a config setting (`randu
 - With the frost switch on as well: Tier 1 4.8%, Tier 2 64.7% (both pass); reported alongside only (D24, D40), not used to choose.
 - Part of the foliage improvement is expected by construction (D44 caveat); GPP and LAI checks improved too, which the constraint does not target directly.
 
+**F16. Fake-data check, full run (D48, D49; Roihu job 2278889, 2026-10-14/15).** Fake NEE from a known "true" forest on the real 1997-2010 weather, gaps and RANDUNC; 4 chains x (1,000 warm-up + 1,000 kept).
+- **D49 criteria: all PASS.** No divergences (0 of 4,000); largest R-hat 1.002; smallest effective sample size 1,963 (bulk) and 2,304 (tail); truth inside the 90% interval for **20 of 24**, exactly the minimum set in advance.
+- **The four misses:** `f_fol` (only just outside: truth 0.0484, interval from 0.0487), `theta_roo` (truth 0.0016, interval 0.0018 to 0.0040), `c_roo_0` (truth 372, interval 177 to 346) and `c_som_0` (truth 4,439, interval 5,057 to 9,160). Four or more misses happen by chance in about 21% of perfect fits, so the count itself is not alarming. **But the misses are not random:** they come in pool and rate pairs. For roots, the fit chose a smaller pool turning over faster than the truth; for soil, a larger pool (with a slightly slower rate, still inside its interval). NEE sees mainly the flux leaving a pool (about rate x pool), so "small pool, fast rate" and "large pool, slow rate" look alike. The implied fluxes still differ from the truth by about 18% (roots) and 29% (soil), so other parameters share the compensation. Reading: these pools and rates are **only weakly identifiable from NEE alone**, even when the model is perfect. The soil truth also sat in the low tail of its prior (about -0.8 on Figure N's scale), and with weak information the posterior stays nearer the prior centre. This is a result for RQ1, not a code error.
+- **How much NEE narrowed each prior** (posterior width / prior width): strongly informed (below 0.5): `f_auto`, `theta_lit`, temperature exponent (0.03), `d_onset` (0.08), `cr_onset`, `d_fall`, `cr_fall`, `c_lf`, `ceff` (0.07), `c_lab_0`, `c_fol_0`, `c_lit_0`. Partly informed: the four allocation shares, `theta_roo`, `theta_woo`, `theta_som`, `h`, `lma`, `c_roo_0`, `c_som_0`. Not informed: `c_woo_0` (0.92). Caveat: one truth only (D48); a second truth would show whether this pattern is general.
+- **Cost:** 29.4 h on 4 CPUs (52.9 s per draw). The step size settled at about 0.005 and almost every draw used the maximum 1,023 gradient evaluations (92 of 4,000 hit the maximum tree depth, which wastes time but does not bias the result). Likely cause: the posterior is very narrow in some directions (temperature exponent, `ceff`, `d_onset`) and has long sloping ridges in others (the pool and rate pairs), which a diagonal mass matrix cannot straighten out. The first job with a 24 h limit (2278575) timed out, so D50's limit was raised to 48 h.
+- **What it allows:** the code and sampler recover a known answer, so a real-data fit with the same settings can be trusted computationally (Gelman et al. 2020, Section 4.1).
+
 ---
 
 ## Part 5. Open items
@@ -621,7 +652,7 @@ Implementation (planned): the observation model will be a config setting (`randu
 - D44: raise with the supervisor that "no EDCs" became "a soft EDC on the foliage pool".
 - References marked "check" below: verify against the original papers.
 
-**OPEN-7. Choice of sampler.** NUTS as the only sampler is carried over from the previous repository. Its settings are now fixed (D49), but alternatives are not yet re-assessed. Decide after the fake-data run: if it is too slow on the author's machine, the options are running on Roihu, or nutpie (another NUTS implementation that PyMC can call, often faster and with better warm-up, `nuts_sampler="nutpie"`).
+**OPEN-7. Choice of sampler.** NUTS as the only sampler is carried over from the previous repository. Its settings are now fixed (D49); a dense mass matrix is being tested (D52); other alternatives are not yet re-assessed. Decide after the fake-data run: if it is too slow on the author's machine, the options are running on Roihu, or nutpie (another NUTS implementation that PyMC can call, often faster and with better warm-up, `nuts_sampler="nutpie"`).
 
 ### Planned sensitivity runs (decided in principle, to run after the main fit)
 
