@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --mem=8G
 #SBATCH --output=jobs/logs/fit-%j.out
 #
 # Real-data fit (DECISIONS.md D51): 1997-2010, 4 chains of 1,000 warm-up +

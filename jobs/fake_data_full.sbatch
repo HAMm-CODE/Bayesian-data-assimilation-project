@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --mem=8G
 #SBATCH --output=jobs/logs/fake-full-%j.out
 #
 # Full fake-data check (DECISIONS.md D48, D49): 14 years, 4 chains of

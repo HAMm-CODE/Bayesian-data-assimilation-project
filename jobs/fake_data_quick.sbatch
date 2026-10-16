@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=8G
+#SBATCH --mem=4G
 #SBATCH --output=jobs/logs/fake-quick-%j.out
 #
 # Quick fake-data check (DECISIONS.md D48): 2 years, 2 short chains.
