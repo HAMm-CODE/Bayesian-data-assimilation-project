@@ -95,6 +95,13 @@ def main() -> None:
             "annual GPP": np.median(summary["gpp"]),
             "peak LAI": np.median(summary["peak_lai"]),
         }
+        # How seasonal is the canopy? Lowest / highest LAI within each year, averaged
+        # over years: near 1 for an evergreen whose needle mass hardly changes.
+        swing = np.mean([out.lai[:, years == y].min(axis=1) / out.lai[:, years == y].max(axis=1)
+                         for y in np.unique(years)], axis=0)
+        row["LAI lowest / highest in a year"] = np.median(swing)
+        if "sigma_m" in post.data_vars:
+            row["sigma_m (model error)"] = np.median(values("sigma_m"))
         row.update({name: np.median(raw[name]) if name in raw else np.median(values(name))
                     for name in SHOW})
         rows.append(row)
