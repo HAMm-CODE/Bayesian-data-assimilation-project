@@ -7,7 +7,10 @@ from scipy import stats
 
 from dalec.inference import SHARES, build_model, initial_values
 from dalec.model_numpy import run
-from dalec.priors import C_LF_RANGE, DIRICHLET_ALPHA, PRIORS, sample_prior, steady_state_ratio
+from dalec.priors import (
+    C_LF_RANGE, DIRICHLET_ALPHA, PRIORS, edc_log_weight, log_prior, sample_prior,
+    steady_state_ratio,
+)
 from test_model_numpy import LAT, median_parameters, synthetic_drivers
 
 DRIVERS = synthetic_drivers(2)
@@ -104,3 +107,23 @@ def test_rejects_assimilable_day_without_sigma():
     sigma[np.flatnonzero(use)[0]] = 0.0
     with pytest.raises(ValueError, match="sigma"):
         build_model(DRIVERS, observed, sigma, use, latitude_deg=LAT)
+
+
+def test_log_prior_plus_terms_equals_hand_computation():
+    """priors.log_prior (used by the chain diagnosis) + D44 term + likelihood
+    equals the independent hand computation of the full log posterior."""
+    params = median_parameters()
+    observed, sigma, use = fake_observations(params)
+    expected, point = hand_logp(params, 0.2, 0.0, observed, sigma, use, "randunc_only")
+    raw = {name: point[name] for name in PRIORS}
+    growth = 1.0 - point["f_auto"]
+    for k, name in enumerate(SHARES):
+        raw[name] = growth * point["shares"][k]
+    reference = run(type(params)(**{**params.as_arrays(),
+                                    "theta_min": point["theta_lit"] * 0.2 / 0.8}),
+                    DRIVERS, latitude_deg=LAT)
+    rs = steady_state_ratio(reference.pools_in["c_fol"], reference.pools_out["c_fol"],
+                            reference.pools_yearly["c_fol"].mean(), reference.pools_start["c_fol"])
+    likelihood = stats.norm(reference.nee[use], sigma[use]).logpdf(observed[use]).sum()
+    total = float(log_prior(raw)) + float(edc_log_weight(rs)) + likelihood
+    assert total == pytest.approx(expected, rel=1e-9)

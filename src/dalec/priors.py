@@ -90,6 +90,37 @@ def sample_prior(n: int, rng: np.random.Generator) -> tuple[Parameters, dict[str
     return Parameters(**model_fields), raw
 
 
+def log_prior(raw: dict[str, Any]) -> np.ndarray:
+    """Log prior density of parameter sets, the same density the PyMC model uses
+    (D34 to D43, without the D44 soft term). `raw` holds the sampled quantities
+    as `sample_prior` returns them: every PRIORS entry plus the four allocation
+    values as shares of GPP. Used to diagnose fits (which chain is believable?)."""
+    from scipy import stats
+    from scipy.special import gammaln
+
+    total = 0.0
+    for name, (kind, a, b) in PRIORS.items():
+        x = np.asarray(raw[name], dtype=float)
+        if kind == "lognormal":
+            total = total + stats.lognorm(s=b, scale=a).logpdf(x)
+        elif kind == "normal":
+            total = total + stats.norm(a, b).logpdf(x)
+        else:
+            dist = stats.beta(a, b)
+            density = dist.logpdf(x)
+            if name == "c_lf":          # truncated to the polynomial's range (D41)
+                low, high = C_LF_RANGE
+                inside = (x >= low) & (x <= high)
+                density = np.where(inside, density - np.log(dist.cdf(high) - dist.cdf(low)), -np.inf)
+            total = total + density
+    alpha = np.array(list(DIRICHLET_ALPHA.values()))
+    growth = 1.0 - np.asarray(raw["f_auto"], dtype=float)
+    shares = np.stack([np.asarray(raw[k], dtype=float) / growth for k in DIRICHLET_ALPHA])
+    total = total + (np.sum((alpha[:, None] - 1) * np.log(shares.reshape(4, -1)), axis=0).reshape(growth.shape)
+                     + gammaln(alpha.sum()) - gammaln(alpha).sum())
+    return np.asarray(total)
+
+
 def to_prior_scale(name: str, values) -> np.ndarray:
     """A sampled quantity on the scale its prior lives on (D32): log for
     log-normal priors, logit for fractions (beta priors and the four allocation
