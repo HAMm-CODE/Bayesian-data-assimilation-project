@@ -94,7 +94,8 @@ def parameter_table(idata, interval: float, seed: int,
     value lies inside the posterior interval."""
     lo, hi = 50 * (1 - interval), 50 * (1 + interval)
     _, prior = sample_prior(20_000, np.random.default_rng(seed))
-    diagnostics = az.summary(idata, var_names=list(QUANTITIES))
+    diagnostics = az.summary(idata, var_names=[q for q in QUANTITIES if
+                                               float(np.ptp(np.asarray(idata.posterior[q].values))) > 0])
     rows = []
     for name in QUANTITIES:
         post = np.asarray(idata.posterior[name].values, dtype=float).reshape(-1)
@@ -114,10 +115,11 @@ def parameter_table(idata, interval: float, seed: int,
             row["truth_inside"] = bool(q_lo <= truth[name] <= q_hi)
         row.update({
             "width_ratio": ratio,
-            "narrowing": next(label for limit, label in NARROWING if ratio < limit),
-            "r_hat": float(diagnostics.loc[name, "r_hat"]),
-            "ess_bulk": float(diagnostics.loc[name, "ess_bulk"]),
-            "ess_tail": float(diagnostics.loc[name, "ess_tail"]),
+            "narrowing": ("fixed" if q_hi == q_lo else
+                          next(label for limit, label in NARROWING if ratio < limit)),
+            "r_hat": float(diagnostics.loc[name, "r_hat"]) if name in diagnostics.index else np.nan,
+            "ess_bulk": float(diagnostics.loc[name, "ess_bulk"]) if name in diagnostics.index else np.nan,
+            "ess_tail": float(diagnostics.loc[name, "ess_tail"]) if name in diagnostics.index else np.nan,
         })
         rows.append(row)
     return pd.DataFrame(rows).set_index("quantity")
@@ -142,9 +144,10 @@ def print_table_and_health(table: pd.DataFrame, health: dict[str, float], headin
           f"tail {table['ess_tail'].min():.0f}")
 
     heading("How much NEE narrowed each prior (posterior width / prior width)")
-    for _, label in NARROWING:
+    for label in [label for _, label in NARROWING] + ["fixed"]:
         names = table.index[table["narrowing"] == label].tolist()
-        print(f"  {label:18s} {len(names):2d}: {', '.join(names)}")
+        if names or label != "fixed":
+            print(f"  {label:18s} {len(names):2d}: {', '.join(names)}")
 
 
 def computation_checks(table: pd.DataFrame, health: dict[str, float],

@@ -127,3 +127,17 @@ def test_log_prior_plus_terms_equals_hand_computation():
     likelihood = stats.norm(reference.nee[use], sigma[use]).logpdf(observed[use]).sum()
     total = float(log_prior(raw)) + float(edc_log_weight(rs)) + likelihood
     assert total == pytest.approx(expected, rel=1e-9)
+
+
+def test_fixed_parameters_are_constants_and_drop_out_of_the_prior():
+    """D54: a fixed parameter is not sampled, and the log density equals the full
+    one minus that parameter's own prior term."""
+    params = median_parameters(lma=185.0)
+    observed, sigma, use = fake_observations(params)
+    model = build_model(DRIVERS, observed, sigma, use, latitude_deg=LAT, fixed={"lma": 185.0})
+    assert "lma" not in {rv.name for rv in model.free_RVs}
+    expected, point = hand_logp(params, 0.2, 0.0, observed, sigma, use, "randunc_only")
+    free = {k: v for k, v in point.items() if k != "lma"}
+    assert model_logp(model, free) == pytest.approx(expected - prior_logp("lma", 185.0), rel=1e-9)
+    with pytest.raises(ValueError, match="fixed"):
+        build_model(DRIVERS, observed, sigma, use, latitude_deg=LAT, fixed={"not_a_parameter": 1.0})

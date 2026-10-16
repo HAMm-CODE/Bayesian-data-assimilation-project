@@ -55,13 +55,23 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
                 frost_threshold_degc: float | None = None,
                 observation_model: str = "randunc_only",
                 model_error_prior_sd: float = 1.0,
-                edc_eqf: float = EDC_EQF) -> pm.Model:
+                edc_eqf: float = EDC_EQF,
+                fixed: dict[str, float] | None = None) -> pm.Model:
     """Build the PyMC model for one block of days.
 
     `observed_nee`, `sigma` (RANDUNC) and `assimilable` (the D12 mask) have one
     value per day of `drivers`. The model runs through every day; only
     assimilable days enter the likelihood (D12).
+
+    `fixed` holds parameters to keep constant instead of sampling (D54, a
+    simpler model in the sense of Gelman et al. 2020, Section 5.2). They are
+    stored as constants under their own names, so every later step reads them
+    exactly like sampled ones.
     """
+    fixed = dict(fixed or {})
+    unknown = set(fixed) - set(PRIORS)
+    if unknown:
+        raise ValueError(f"only parameters with a prior can be fixed; unknown: {sorted(unknown)}")
     n = drivers.n_days
     observed_nee = np.asarray(observed_nee, dtype=float)
     sigma = np.asarray(sigma, dtype=float)
@@ -81,7 +91,9 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
 
     with pm.Model() as model:
         # Priors (D34 to D43), read from the single list in priors.py.
-        rv = {name: _prior_variable(name, spec) for name, spec in PRIORS.items()}
+        rv = {name: (pm.Deterministic(name, pt.as_tensor_variable(np.float64(fixed[name])))
+                     if name in fixed else _prior_variable(name, spec))
+              for name, spec in PRIORS.items()}
         shares = pm.Dirichlet("shares", a=np.array(list(DIRICHLET_ALPHA.values())))
 
         # Parameters the model needs that follow from the sampled ones.
@@ -138,6 +150,8 @@ def sample(model: pm.Model, starts: list[dict[str, Any]], *, draws: int, tune: i
     """
     if mass_matrix not in MASS_MATRIX_INIT:
         raise ValueError(f"mass_matrix must be one of {tuple(MASS_MATRIX_INIT)}, got {mass_matrix!r}")
+    sampled = {rv.name for rv in model.free_RVs}
+    starts = [{k: v for k, v in start.items() if k in sampled} for start in starts]
     with model:
         return pm.sample(draws=draws, tune=tune, chains=len(starts), cores=min(cores, len(starts)),
                          initvals=starts, init=MASS_MATRIX_INIT[mass_matrix],

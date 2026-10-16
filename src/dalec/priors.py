@@ -90,6 +90,21 @@ def sample_prior(n: int, rng: np.random.Generator) -> tuple[Parameters, dict[str
     return Parameters(**model_fields), raw
 
 
+def prior_median(name: str) -> float:
+    """The median of one prior: the value a parameter is held at when it is fixed (D54).
+    For `c_lf`, the median of the truncated beta (D41)."""
+    from scipy import stats
+    kind, a, b = PRIORS[name]
+    if kind in ("lognormal", "normal"):
+        return float(a)
+    dist = stats.beta(a, b)
+    if name == "c_lf":
+        low, high = C_LF_RANGE
+        lo, hi = dist.cdf(low), dist.cdf(high)
+        return float(dist.ppf(lo + 0.5 * (hi - lo)))
+    return float(dist.median())
+
+
 def log_prior(raw: dict[str, Any]) -> np.ndarray:
     """Log prior density of parameter sets, the same density the PyMC model uses
     (D34 to D43, without the D44 soft term). `raw` holds the sampled quantities

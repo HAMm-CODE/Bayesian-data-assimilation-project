@@ -54,6 +54,7 @@ from dalec.posterior import (
     check_can_save, computation_checks, interval_figure, parameter_table,
     possible_draws, posterior_parameters, print_table_and_health, sampler_health, search_prior,
 )
+from dalec.priors import prior_median
 
 SEASONS = {"DJF": (12, 1, 2), "MAM": (3, 4, 5), "JJA": (6, 7, 8), "SON": (9, 10, 11)}
 
@@ -220,6 +221,9 @@ def main() -> None:
                         help="override likelihood.observation_model from the config (L1)")
     parser.add_argument("--mass-matrix", choices=tuple(MASS_MATRIX_INIT), default=None,
                         help="override sampler.mass_matrix from the config (D52)")
+    parser.add_argument("--fix", default="",
+                        help="comma-separated parameters to hold at their prior median (D54), "
+                             "e.g. --fix lma,c_lf")
     parser.add_argument("--target-accept", type=float, default=None,
                         help="override sampler.target_accept (D53); higher = smaller, safer steps")
     args = parser.parse_args()
@@ -238,7 +242,9 @@ def main() -> None:
         settings["target_accept"] = args.target_accept
     ta_tag = ("" if float(settings["target_accept"]) == float(config["sampler"]["target_accept"])
               else f"_ta{round(100 * float(settings['target_accept']))}")
-    label = ("fit" + ("_model_error" if observation_model != "randunc_only" else "")
+    fixed = {name: prior_median(name) for name in filter(None, args.fix.split(","))}
+    fix_tag = ("_fix-" + "-".join(sorted(fixed))) if fixed else ""
+    label = ("fit" + ("_model_error" if observation_model != "randunc_only" else "") + fix_tag
              + ("_frost" if frost_on else "") + ("_dense" if mass_matrix == "dense" else "") + ta_tag
              + ("_quick" if args.quick else ""))
     interval = float(fit["interval"])
@@ -260,13 +266,16 @@ def main() -> None:
     print(f"  {drivers.n_days} days, of which {int(use.sum())} assimilable (D12)")
     print(f"  observation model {observation_model}; frost switch {'on' if frost_on else 'off'}; "
           f"mass matrix {mass_matrix}")
+    if fixed:
+        print("  held fixed at their prior medians (D54): "
+              + ", ".join(f"{k} = {v:.4g}" for k, v in fixed.items()))
     _, raw, _, checks = search_prior(drivers, years, latitude, frost, seed=int(fit["seed"]),
                                      n_candidates=int(fit["n_candidates"]), batch_size=batch_size)
     starts = possible_draws(checks, int(settings["chains"]))
     print(f"  chain starts = prior draws {starts} (each passes Tier 1, D45)")
     model = build_model(drivers, observed, sigma, use, latitude_deg=latitude,
                         frost_threshold_degc=frost, observation_model=observation_model,
-                        model_error_prior_sd=float(lik["model_error_prior_sd"]))
+                        model_error_prior_sd=float(lik["model_error_prior_sd"]), fixed=fixed)
     print(f"  {settings['chains']} chains x ({settings['tune']} warm-up + {settings['draws']} kept), "
           f"target_accept {settings['target_accept']}")
     began = time.perf_counter()

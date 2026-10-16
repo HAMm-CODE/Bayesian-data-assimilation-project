@@ -510,11 +510,40 @@ Following F12 and D40 ("change only the priors linked to failure, with a stated 
 **Adopt dense with target_accept 0.95 for later runs only if all three D52 criteria hold** (all four D49 criteria including no divergences; at most about 20.5 h; every posterior median within 10% of the diagonal run's 90% interval width). Otherwise the diagonal setting stays. Fixed before running.
 **Code:** scripts 04 and 05 accept `--target-accept`; the value is added to the output names (e.g. `_dense_ta95`).
 
+### D54. A simpler model: holding the canopy parameters fixed (Decided as a test, 2026-10-16)
+**Why.** With model error (L1), the chains agree, but the fit still builds GPP from an implausible canopy: thin, partly deciduous, very efficient leaves (F18). Gelman et al. (2020, Section 5.2) suggest simplifying a poorly behaving model, "stripping it down until you get something that works". The aim is to take away the canopy's freedom to imitate a winter shutdown, so the remaining misfit shows up openly (in the predictive checks and in sigma_m) instead of hiding in the parameters.
+
+**How.** `--fix name,...` in script 05 holds the named parameters at their prior medians (`prior_median` in `priors.py`), which are site-based (D37, D38, D42, D43). They are stored as constants, so every later step reads them like sampled ones; Figure O marks them "fixed". Tested: the log density equals the full one minus the fixed parameters' prior terms (`tests/test_inference.py`).
+
+**The ladder of simpler models, from least to most fixed:**
+
+| Version | Held fixed (value) | What it removes |
+|---|---|---|
+| S1 | `lma` (185 g C m-2), `c_lf` (0.262, needles about 3.8 years) | the canopy's freedom to become thin and short-lived |
+| S2 | S1 + `ceff` (10, REFLEX median) | also the freedom to make leaves very efficient; GPP size then follows the weather and the fixed canopy |
+| S3 | S1 + leaf calendar `d_onset`, `cr_onset`, `d_fall`, `cr_fall` | also the timing of needle flush and fall |
+
+S1 and S2 are tested first (quick runs, real NEE 1997-1998, model error on).
+
+**Other simplifications considered:**
+- *Fixing the parameters NEE cannot inform* (F16: `c_woo_0`; the root and soil pool/rate pairs). Helps the sampler, not the canopy problem; kept for later.
+- *A structurally simpler DALEC:* the evergreen DALEC of Williams et al. (2005), with no labile pool and no leaf-timing pulses, only a constant needle loss rate. It cannot build a seasonal canopy at all. (An evergreen DALEC comparison was earlier dropped as an RQ3 plan; here it would be a simplification of the model, not a comparison.) Bigger change: new model code and new checks.
+
+**The expansion alternative, for comparison (not chosen yet):** DALEC2cold (Stettz et al. 2022) multiplies GPP by a cold scalar on minimum temperature: 0 below T0, 1 above Tg, a straight line in between, with T0 and Tg calibrated (at Niwot Ridge T0 = -7.1 +/- 1.1 C, Tg = 6.0 +/- 2.6 C). Two extra parameters. Stettz et al. had no LAI constraint and note that their site's LAI is roughly constant through the season; they did not test whether baseline DALEC2 compensated through the canopy.
+
+**How each version is judged (fixed before running), with `diagnose_chains.py`:** do the chains agree; are the remaining sampled parameters believable (Tier 2 and log prior); how large sigma_m becomes (a larger value means more misfit admitted openly); the canopy swing (lowest / highest LAI); and the average misfit by season (script 05, part 5). Preferred: the least-fixed version whose remaining parameters are believable. All versions are reported.
+
 ## Part 3. Likelihood
 
-### L1. Observation model: what sigma is (Decided, 2026-10-08)
+### L1. Observation model: what sigma is (Decided, 2026-10-08; main model changed 2026-10-16)
 
-**Main model (option A): sigma is RANDUNC.**
+**Change on 2026-10-16: the main model is now option C (RANDUNC plus model error).**
+
+    NEE_t ~ Normal( model_t , sqrt(RANDUNC_t^2 + sigma_m^2) ),   sigma_m ~ HalfNormal(1)
+
+**Why it changed.** On the real NEE, option A left the sampler with separate modes and pushed the parameters to physically impossible forests (F17). Option C, planned below as the sensitivity run before any data were seen, removed the separate modes and brought the parameters much closer to the priors (F18). The fitted model error, about 0.6 g C m-2 d-1, is larger than RANDUNC on most days: DALEC2's daily misfit is larger than the measurement error, so treating RANDUNC as the whole error claimed a precision the model cannot have. This follows Gelman et al. (2020, Sections 5.1, 7.1 and 10.5: an added error term "to allow for model misspecification"). **Option A becomes the sensitivity run** and is reported (F17), not hidden. The fake-data check (D48) still uses option A, because its fake noise is RANDUNC only.
+
+**The original main model (option A, 2026-10-08), kept for the record: sigma is RANDUNC.**
 
     NEE_t ~ Normal( model_t , RANDUNC_t )      [g C m-2 d-1], assimilable days only (D12)
 
@@ -535,7 +564,7 @@ Known consequences, stated as limitations:
 
 **Sensitivity analysis (planned, later):**
 
-- Option C: sigma_t = sqrt( RANDUNC_t^2 + sigma_m^2 ), with sigma_m ~ HalfNormal(1) estimated jointly. Adds one shared model-error term.
+- Option C: sigma_t = sqrt( RANDUNC_t^2 + sigma_m^2 ), with sigma_m ~ HalfNormal(1) estimated jointly. Adds one shared model-error term. (Main model since 2026-10-16, see above.)
 - Support for option C if needed: Gelman et al. (2020, Section 10.5), golf putting example (known per-point variance plus an added independent error term "to allow for model misspecification"); Fer et al. (2018), observation-error parameters estimated during calibration.
 - Compare the two on: posterior widths, winter share of the likelihood weight, R-hat, divergences and number of posterior modes.
 
@@ -694,14 +723,14 @@ Implementation (planned): the observation model will be a config setting (`randu
 
 **OPEN-7. Choice of sampler.** NUTS as the only sampler is carried over from the previous repository. Its settings are now fixed (D49); a dense mass matrix is being tested (D52); other alternatives are not yet re-assessed. Decide after the fake-data run: if it is too slow on the author's machine, the options are running on Roihu, or nutpie (another NUTS implementation that PyMC can call, often faster and with better warm-up, `nuts_sampler="nutpie"`).
 
-**OPEN-8. How to respond to F17 (real NEE pulls the parameters out of the believable region).** Options, all already recorded as planned changes, none tuned to the result: (a) add model error to sigma (L1 option C, Gelman et al. 2020, Sections 7.1 and 10.5), so the likelihood stops treating DALEC2 as able to match each day within RANDUNC; (b) the frost switch (D24), aimed at the spring misfit; (c) both; (d) a Laplace error (L2). Plan: quick fits of (a), (b) and (c) first, each judged with `diagnose_chains.py` (are the chains believable and do they agree?). **Status 2026-10-16 (F18):** (a) removes the separate modes and is the strongest candidate for the main error model (a change to L1, to be confirmed); (b) alone does nothing. The remaining implausible canopy leaves three routes (Gelman et al. 2020, Sections 5.2, 6.1, 7): tolerate and report it; simplify (fix the canopy parameters at site values); or expand (a cold limit on photosynthesis, Stettz et al. 2022). To discuss with the supervisor. Gelman et al. (2020, Section 5.9) warn against "haphazardly tweaking the model until computational problems disappear", so every option must have its own reason, and all results are reported, not only the one that works.
+**OPEN-8. How to respond to F17 (real NEE pulls the parameters out of the believable region).** Options, all already recorded as planned changes, none tuned to the result: (a) add model error to sigma (L1 option C, Gelman et al. 2020, Sections 7.1 and 10.5), so the likelihood stops treating DALEC2 as able to match each day within RANDUNC; (b) the frost switch (D24), aimed at the spring misfit; (c) both; (d) a Laplace error (L2). Plan: quick fits of (a), (b) and (c) first, each judged with `diagnose_chains.py` (are the chains believable and do they agree?). **Status 2026-10-16 (F18):** (a) removes the separate modes and is now the main error model (L1, changed 2026-10-16); (b) alone does nothing. The remaining implausible canopy leaves three routes (Gelman et al. 2020, Sections 5.2, 6.1, 7): tolerate and report it; simplify (fix the canopy parameters at site values); or expand (a cold limit on photosynthesis, Stettz et al. 2022). To discuss with the supervisor. Gelman et al. (2020, Section 5.9) warn against "haphazardly tweaking the model until computational problems disappear", so every option must have its own reason, and all results are reported, not only the one that works.
 
 ### Planned sensitivity runs (decided in principle, to run after the main fit)
 
 | Run | What changes | Entry |
 |---|---|---|
 | Frost switch | GPP stopped when the midpoint temperature is below -2 C | D24 |
-| Model error added to sigma | sigma_t = sqrt(RANDUNC_t^2 + sigma_m^2), sigma_m estimated | L1 |
+| RANDUNC only (the original main model) | sigma_t = RANDUNC_t, no model error | L1 (main model changed 2026-10-16) |
 | Wider `f_auto` prior | sd 0.10 instead of 0.07, only if the posterior is about as wide as the prior | D34 |
 | Wider priors where NEE gave no information | only for parameters whose posterior is about as wide as the prior | D35, way forward 3 |
 | Day-to-day correlated errors | for example AR(1) errors, if time allows | F11 |
@@ -765,6 +794,7 @@ Not yet re-assessed:
 - Vehtari, A., Gelman, A., Simpson, D., Carpenter, B. and Burkner, P.-C. (2021). Rank-normalization, folding, and localization: an improved R-hat for assessing convergence of MCMC. Bayesian Analysis 16(2), 667-718.
 - Waring, R. H., Landsberg, J. J. and Williams, M. (1998). Net primary production of forests: a constant fraction of gross primary production? Tree Physiology 18, 129-134.
 - Williams, M. et al. (1997). Predicting gross primary productivity in terrestrial ecosystems. Ecological Applications 7(3), 882-894. (Cited for the frost rule, D24; the rule itself not yet found in it.)
+- Williams, M., Schwarz, P. A., Law, B. E., Irvine, J. and Kurpius, M. R. (2005). An improved analysis of forest carbon dynamics using data assimilation. Global Change Biology 11, 89-105. (The evergreen DALEC; details to check.)
 - Williams, M. et al. (2009). Improving land surface models with FLUXNET data. Biogeosciences 6, 1341-1359.
 - Yuan, Q. et al. (2025). Global carbon flux dataset generated by fusing remote sensing and multiple flux networks observation. Scientific Data.
 

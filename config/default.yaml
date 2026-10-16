@@ -51,7 +51,7 @@ prior_predictive:              # DECISIONS.md D40
   seed: 20261013               # fixed so the check is reproducible
 
 likelihood:                    # DECISIONS.md L1
-  observation_model: randunc_only    # main fit; randunc_plus_model_error for the sensitivity run
+  observation_model: randunc_plus_model_error   # main fit since 2026-10-16 (L1, F18); randunc_only = sensitivity run
   model_error_prior_sd: 1.0          # HalfNormal sd of sigma_m (g C m-2 d-1); sensitivity run only
 
 sampler:                       # NUTS settings, DECISIONS.md D49
