@@ -504,6 +504,12 @@ Following F12 and D40 ("change only the priors linked to failure, with a stated 
 
 **Adopt dense for later runs only if all three hold** (fixed before running): (1) it passes all four D49 criteria; (2) it takes at least 30% less time than 29.4 h, i.e. at most about 20.5 h; (3) for every quantity, its posterior median differs from the diagonal run's by less than 10% of the diagonal run's 90% interval width. Otherwise the diagonal setting stays. The main real-data fit (D51) uses the validated diagonal setting either way.
 
+### D53. Second speed test: dense mass matrix with target_accept 0.95 (Decided, 2026-10-16)
+**Why.** F19: dense was 6 times faster and gave the same posterior, but had 13 divergences. A divergence marks a place where the step was too large for the curvature; raising `target_accept` from 0.9 to 0.95 makes the sampler choose smaller steps, which usually removes them at a modest cost in speed.
+**Test.** The same fake-data check (D48) with `--mass-matrix dense --target-accept 0.95`.
+**Adopt dense with target_accept 0.95 for later runs only if all three D52 criteria hold** (all four D49 criteria including no divergences; at most about 20.5 h; every posterior median within 10% of the diagonal run's 90% interval width). Otherwise the diagonal setting stays. Fixed before running.
+**Code:** scripts 04 and 05 accept `--target-accept`; the value is added to the output names (e.g. `_dense_ta95`).
+
 ## Part 3. Likelihood
 
 ### L1. Observation model: what sigma is (Decided, 2026-10-08)
@@ -647,6 +653,26 @@ Implementation (planned): the observation model will be a config setting (`randu
 - **Correction:** the first version of `diagnose_chains.py` called chain 0 "believable" because it passed Tier 1. That was too weak a test; the script now also requires Tier 2 and a log prior within the range of real prior draws.
 - **Next:** open, see OPEN-8.
 
+**F18. Quick fits of the OPEN-8 options (real NEE 1997-1998, 2 short chains each; `diagnose_chains.py`, 2026-10-16).** Log prior of a typical prior draw about -22 (1 in 1,000 below -37).
+
+| Quick run | Chains agree? | Log prior (both chains) | Model error sigma_m |
+|---|---|---|---|
+| RANDUNC only (F17) | no, 1,899 apart | -384 / -998 | (none) |
+| + frost switch | no, 903 apart | -340 / -1,040 | (none) |
+| + model error | yes, 2.6 apart | -89 / -90 | 0.59 g C m-2 d-1 |
+| + model error + frost | yes, 0.8 apart | -76 / -78 | 0.57 |
+
+- **Model error removes the separate modes** and brings the parameters much closer to the priors: the error model was the cause of the computational problem (Gelman et al. 2020, Section 5.1). The fitted model error, about 0.6 g C m-2 d-1, is larger than RANDUNC on most days, i.e. DALEC2's daily misfit is bigger than the measurement error.
+- **The frost switch alone changes nothing;** with model error it helps a little.
+- **What remains is the same in both model-error runs:** annual GPP about 1,020 (inside the site range 952 to 1,104) produced by an implausible canopy: peak LAI about 1 (site 2.5 to 4), `ceff` about 110 (prior 5 to 20), `lma` 400 to 460, needles living 2.1 to 2.6 years (prior 3 to 5), `f_auto` 0.34 (prior 0.37 to 0.65), Q10 about 2.0 to 2.3.
+- **The canopy shrinks each winter.** Lowest / highest leaf area within a year: 0.40 (model error) and 0.50 (with frost), against 0.69 to 0.83 (median 0.77) for believable prior forests (computed on synthetic weather; this ratio depends mainly on the leaf timing parameters). **Interpretation (a hypothesis, consistent with the numbers):** DALEC2 has no cold limit on photosynthesis (F12; Stettz et al. 2022), so the fit imitates the winter shutdown of the real forest by making the canopy partly deciduous: small, short-lived needles, very efficient leaves. Total GPP right, canopy wrong: the "right answer for the wrong reasons" of RQ3.
+
+**F19. Speed test with a dense mass matrix (D52; Roihu job 2317355, fake data, 2026-10-15).**
+- **Time: 4.8 h against 29.4 h** (about 80 instead of about 1,000 gradient evaluations per draw; step size 0.049 against 0.005). D52 criterion 2: PASS.
+- **Same answer:** every posterior median within 2% of the diagonal run's 90% interval width (largest `f_woo`, 1.9%); interval widths within 7 to 9%; the same four truths outside their intervals. D52 criterion 3: PASS.
+- **But 13 divergences in 4,000 draws** (0.3%), so D49 criterion 1 fails and D52 criterion 1 fails. R-hat (largest 1.005) and effective sample sizes (at least 592) pass.
+- **Verdict under the rule fixed in advance: dense is not adopted; the diagonal setting stays.** The divergences most likely come from the much larger step size in a few curved regions; the usual remedy is a higher `target_accept` (smaller steps). That is a new test, D53, not a reinterpretation of D52.
+
 ---
 
 ## Part 5. Open items
@@ -668,7 +694,7 @@ Implementation (planned): the observation model will be a config setting (`randu
 
 **OPEN-7. Choice of sampler.** NUTS as the only sampler is carried over from the previous repository. Its settings are now fixed (D49); a dense mass matrix is being tested (D52); other alternatives are not yet re-assessed. Decide after the fake-data run: if it is too slow on the author's machine, the options are running on Roihu, or nutpie (another NUTS implementation that PyMC can call, often faster and with better warm-up, `nuts_sampler="nutpie"`).
 
-**OPEN-8. How to respond to F17 (real NEE pulls the parameters out of the believable region).** Options, all already recorded as planned changes, none tuned to the result: (a) add model error to sigma (L1 option C, Gelman et al. 2020, Sections 7.1 and 10.5), so the likelihood stops treating DALEC2 as able to match each day within RANDUNC; (b) the frost switch (D24), aimed at the spring misfit; (c) both; (d) a Laplace error (L2). Plan: quick fits of (a), (b) and (c) first, each judged with `diagnose_chains.py` (are the chains believable and do they agree?). Gelman et al. (2020, Section 5.9) warn against "haphazardly tweaking the model until computational problems disappear", so every option must have its own reason, and all results are reported, not only the one that works.
+**OPEN-8. How to respond to F17 (real NEE pulls the parameters out of the believable region).** Options, all already recorded as planned changes, none tuned to the result: (a) add model error to sigma (L1 option C, Gelman et al. 2020, Sections 7.1 and 10.5), so the likelihood stops treating DALEC2 as able to match each day within RANDUNC; (b) the frost switch (D24), aimed at the spring misfit; (c) both; (d) a Laplace error (L2). Plan: quick fits of (a), (b) and (c) first, each judged with `diagnose_chains.py` (are the chains believable and do they agree?). **Status 2026-10-16 (F18):** (a) removes the separate modes and is the strongest candidate for the main error model (a change to L1, to be confirmed); (b) alone does nothing. The remaining implausible canopy leaves three routes (Gelman et al. 2020, Sections 5.2, 6.1, 7): tolerate and report it; simplify (fix the canopy parameters at site values); or expand (a cold limit on photosynthesis, Stettz et al. 2022). To discuss with the supervisor. Gelman et al. (2020, Section 5.9) warn against "haphazardly tweaking the model until computational problems disappear", so every option must have its own reason, and all results are reported, not only the one that works.
 
 ### Planned sensitivity runs (decided in principle, to run after the main fit)
 

@@ -103,6 +103,8 @@ def main() -> None:
                         help="2 years and short chains: checks that everything runs")
     parser.add_argument("--mass-matrix", choices=tuple(MASS_MATRIX_INIT), default=None,
                         help="override sampler.mass_matrix from the config (D52 speed test)")
+    parser.add_argument("--target-accept", type=float, default=None,
+                        help="override sampler.target_accept (D53); higher = smaller, safer steps")
     args = parser.parse_args()
 
     check_can_save()
@@ -112,7 +114,11 @@ def main() -> None:
     if args.quick:
         settings.update({k: settings["quick"][k] for k in ("chains", "tune", "draws")})
     mass_matrix = args.mass_matrix or settings["mass_matrix"]
-    suffix = ("_dense" if mass_matrix == "dense" else "") + ("_quick" if args.quick else "")
+    if args.target_accept is not None:
+        settings["target_accept"] = args.target_accept
+    ta_tag = ("" if float(settings["target_accept"]) == float(config["sampler"]["target_accept"])
+              else f"_ta{round(100 * float(settings['target_accept']))}")
+    suffix = ("_dense" if mass_matrix == "dense" else "") + ta_tag + ("_quick" if args.quick else "")
 
     data = load_model_block(config, block="calibration")
     drivers = drivers_from_frame(data, config)
