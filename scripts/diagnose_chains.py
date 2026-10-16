@@ -71,7 +71,9 @@ def main() -> None:
         params = Parameters(**{f: values(f) for f in Parameters.__dataclass_fields__})
         raw = {name: values(name) for name in PRIORS}
         raw.update({name: values(name) for name in SHARES})
-        out = run(params, drivers, latitude_deg=latitude, frost_threshold_degc=frost)
+        cold = ((values("cold_t_shutdown"), values("cold_t_full"))
+                if "cold_t_shutdown" in post.data_vars else None)
+        out = run(params, drivers, latitude_deg=latitude, frost_threshold_degc=frost, cold=cold)
         sd = np.broadcast_to(sigma[use], (pick.size, int(use.sum())))
         if "sigma_m" in post.data_vars:
             sd = np.sqrt(sd**2 + values("sigma_m")[:, None] ** 2)
@@ -100,8 +102,13 @@ def main() -> None:
         swing = np.mean([out.lai[:, years == y].min(axis=1) / out.lai[:, years == y].max(axis=1)
                          for y in np.unique(years)], axis=0)
         row["LAI lowest / highest in a year"] = np.median(swing)
+        # A growing or shrinking canopy also lowers the ratio above, so show the trend too.
+        row["foliage pool, end / start"] = np.median(summary["foliage_ratio"])
         if "sigma_m" in post.data_vars:
             row["sigma_m (model error)"] = np.median(values("sigma_m"))
+        if cold is not None:
+            row["cold limit: no GPP below (degC)"] = np.median(cold[0])
+            row["cold limit: full GPP above (degC)"] = np.median(cold[1])
         row.update({name: np.median(raw[name]) if name in raw else np.median(values(name))
                     for name in SHOW})
         rows.append(row)

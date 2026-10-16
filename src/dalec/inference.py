@@ -21,7 +21,7 @@ import pytensor.tensor as pt
 
 from dalec.model import build_forward
 from dalec.model_numpy import Drivers
-from dalec.priors import C_LF_RANGE, DIRICHLET_ALPHA, EDC_EQF, PRIORS
+from dalec.priors import C_LF_RANGE, COLD_PRIORS, DIRICHLET_ALPHA, EDC_EQF, PRIORS
 
 OBSERVATION_MODELS = ("randunc_only", "randunc_plus_model_error")   # L1: main, sensitivity
 SHARES = tuple(DIRICHLET_ALPHA)   # f_lab, f_fol, f_roo, f_woo
@@ -56,7 +56,8 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
                 observation_model: str = "randunc_only",
                 model_error_prior_sd: float = 1.0,
                 edc_eqf: float = EDC_EQF,
-                fixed: dict[str, float] | None = None) -> pm.Model:
+                fixed: dict[str, float] | None = None,
+                cold_limit: bool = False) -> pm.Model:
     """Build the PyMC model for one block of days.
 
     `observed_nee`, `sigma` (RANDUNC) and `assimilable` (the D12 mask) have one
@@ -67,6 +68,9 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
     simpler model in the sense of Gelman et al. 2020, Section 5.2). They are
     stored as constants under their own names, so every later step reads them
     exactly like sampled ones.
+
+    `cold_limit` adds the cold limit on photosynthesis (D55, Stettz et al. 2022)
+    with its two thresholds sampled from COLD_PRIORS.
     """
     fixed = dict(fixed or {})
     unknown = set(fixed) - set(PRIORS)
@@ -104,8 +108,16 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
         theta["theta_min"] = pm.Deterministic(                  # D35
             "theta_min", rv["theta_lit"] * rv["h"] / (1.0 - rv["h"]))
 
+        cold = None
+        if cold_limit:
+            thresholds = []
+            for name, (low, high, a, b) in COLD_PRIORS.items():
+                fraction = pm.Beta(f"{name}_fraction", alpha=np.float64(a), beta=np.float64(b))
+                thresholds.append(pm.Deterministic(
+                    name, np.float64(low) + np.float64(high - low) * fraction))
+            cold = tuple(thresholds)
         out = build_forward(theta, drivers, latitude_deg=latitude_deg,
-                            frost_threshold_degc=frost_threshold_degc)
+                            frost_threshold_degc=frost_threshold_degc, cold=cold)
 
         # Soft steady-state constraint on the foliage pool (D44).
         rs = pm.Deterministic("foliage_rs", out["foliage_rs"])

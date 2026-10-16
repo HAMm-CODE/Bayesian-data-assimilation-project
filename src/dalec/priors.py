@@ -48,6 +48,19 @@ PRIORS: dict[str, tuple] = {
     "c_som_0": ("lognormal", 6100.0, 0.25),
 }
 
+# Cold limit on photosynthesis (D55), used only in the cold-limit model, so kept
+# out of PRIORS (the prior predictive check and the main model do not use it).
+# Ranges from the official code of the cold-limit DALEC (CARDAMOM v2.2,
+# DALEC_831, PARS_INFO_831.c, by S. G. Stettz): lower threshold -15 to 0 degC,
+# upper threshold 0 to 15 degC. The ranges do not overlap, so the upper threshold
+# can never fall below the lower one. The official prior is flat over each range;
+# here each threshold is a Beta(2, 2) fraction of its range (smooth, most weight
+# in the middle, no hard walls for NUTS; D33).
+COLD_PRIORS: dict[str, tuple] = {   # name: (range low, range high, beta a, beta b), degC
+    "cold_t_shutdown": (-15.0, 0.0, 2.0, 2.0),   # no photosynthesis at or below
+    "cold_t_full": (0.0, 15.0, 2.0, 2.0),        # full photosynthesis at or above
+}
+
 # Needle lifespan 1/c_lf must stay inside the range of the offset polynomial (D31).
 C_LF_RANGE = (1.0 / 8.0, 1.0 / 1.001)
 

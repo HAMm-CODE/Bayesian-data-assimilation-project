@@ -118,3 +118,17 @@ def frost_multiplier(t_max, t_min, threshold_degc):
     """
     t_mid = 0.5 * (np.asarray(t_max, dtype=float) + np.asarray(t_min, dtype=float))
     return np.where(t_mid < threshold_degc, 0.0, 1.0)
+
+
+def cold_multiplier(t_min, t_shutdown, t_full):
+    """Cold limit on photosynthesis (D55; "DALEC2cold", Stettz et al. 2022).
+
+    0 on days whose minimum temperature is at or below `t_shutdown`, 1 at or
+    above `t_full`, a straight line in between. Unlike the frost switch, the two
+    thresholds are parameters (sampled in the cold-limit model). Works for
+    single values or one value per draw (thresholds broadcast against t_min).
+    """
+    t_min = np.asarray(t_min, dtype=float)
+    t_shutdown = np.asarray(t_shutdown, dtype=float)
+    t_full = np.asarray(t_full, dtype=float)
+    return np.clip((t_min - t_shutdown) / (t_full - t_shutdown), 0.0, 1.0)

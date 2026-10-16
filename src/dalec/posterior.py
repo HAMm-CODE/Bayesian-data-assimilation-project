@@ -198,14 +198,23 @@ def interval_figure(table: pd.DataFrame, config: dict[str, Any], name: str, titl
     save_figure(fig, name, config)
 
 
-def posterior_parameters(idata, n: int, seed: int) -> tuple[Parameters, np.ndarray]:
-    """n posterior draws, chosen at random across all chains, as model Parameters
-    (for running the numpy model forward: posterior predictive checks)."""
+def posterior_parameters(idata, n: int, seed: int):
+    """n posterior draws, chosen at random across all chains, for running the
+    numpy model forward (posterior predictive checks).
+
+    Returns (Parameters, sigma_m, cold): sigma_m is the model error per draw
+    (zeros without it); cold is (t_shutdown, t_full) per draw in the cold-limit
+    model (D55), otherwise None.
+    """
     post = idata.posterior
     total = int(np.asarray(post["f_auto"].values).size)
     pick = np.sort(np.random.default_rng(seed).choice(total, size=min(n, total), replace=False))
-    fields = Parameters.__dataclass_fields__
-    values = {f: np.asarray(post[f].values, dtype=float).reshape(-1)[pick] for f in fields}
-    sigma_m = (np.asarray(post["sigma_m"].values, dtype=float).reshape(-1)[pick]
-               if "sigma_m" in post.data_vars else np.zeros(pick.size))
-    return Parameters(**values), sigma_m
+
+    def draws(name):
+        return np.asarray(post[name].values, dtype=float).reshape(-1)[pick]
+
+    values = {f: draws(f) for f in Parameters.__dataclass_fields__}
+    sigma_m = draws("sigma_m") if "sigma_m" in post.data_vars else np.zeros(pick.size)
+    cold = ((draws("cold_t_shutdown"), draws("cold_t_full"))
+            if "cold_t_shutdown" in post.data_vars else None)
+    return Parameters(**values), sigma_m, cold

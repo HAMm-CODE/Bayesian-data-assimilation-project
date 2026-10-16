@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from dalec.acm import DALEC2_ACM, AcmConstants, frost_multiplier, gpp as acm_gpp
+from dalec.acm import DALEC2_ACM, AcmConstants, cold_multiplier, frost_multiplier, gpp as acm_gpp
 
 # W m-2 (daily mean) to MJ m-2 d-1: 86,400 s per day / 1,000,000 J per MJ.
 W_M2_TO_MJ_M2_DAY = 0.0864
@@ -205,11 +205,14 @@ class Output:
 
 def run(params: Parameters, drivers: Drivers, *, latitude_deg: float,
         frost_threshold_degc: float | None = None,
+        cold: tuple | None = None,
         constants: AcmConstants = DALEC2_ACM) -> Output:
     """Run DALEC2 over every day of `drivers`, for every draw in `params`.
 
     frost_threshold_degc: None (the main model, D24) or a temperature below
     which GPP is set to zero (the optional frost switch).
+    cold: None (DALEC2 as published) or (t_shutdown, t_full), the thresholds of
+    the cold limit on photosynthesis (D55), one value or one per draw.
     """
     p = params.as_arrays()
     shape = p["f_auto"].shape
@@ -238,6 +241,8 @@ def run(params: Parameters, drivers: Drivers, *, latitude_deg: float,
                       sw_in=drivers.sw_in[i], co2=drivers.co2[i], doy=drivers.doy[i],
                       ceff=p["ceff"], latitude_deg=latitude_deg, constants=constants)
         gpp = gpp * frost[i]
+        if cold is not None:
+            gpp = gpp * cold_multiplier(drivers.t_min[i], cold[0], cold[1])
 
         # Decomposition speeds up with temperature; equals 1 at 0 degC (D20).
         temp_rate = np.exp(p["temperature_exponent"] * t_mid[i])

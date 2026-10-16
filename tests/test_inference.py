@@ -8,7 +8,7 @@ from scipy import stats
 from dalec.inference import SHARES, build_model, initial_values
 from dalec.model_numpy import run
 from dalec.priors import (
-    C_LF_RANGE, DIRICHLET_ALPHA, PRIORS, edc_log_weight, log_prior, sample_prior,
+    C_LF_RANGE, COLD_PRIORS, DIRICHLET_ALPHA, PRIORS, edc_log_weight, log_prior, sample_prior,
     steady_state_ratio,
 )
 from test_model_numpy import LAT, median_parameters, synthetic_drivers
@@ -38,8 +38,9 @@ def fake_observations(params, seed=1):
     return observed, sigma, use
 
 
-def hand_logp(params, h, sigma_m, observed, sigma, use, observation_model):
-    """Priors + D44 term + likelihood, computed with scipy and the numpy model."""
+def hand_logp(params, h, sigma_m, observed, sigma, use, observation_model, cold=None):
+    """Priors + D44 term + likelihood, computed with scipy and the numpy model.
+    `cold` = (t_shutdown, gap) adds the D55 cold limit and its two priors."""
     values = {name: float(getattr(params, name)) for name in PRIORS if name != "h"}
     values["h"] = h
     growth = 1.0 - values["f_auto"]
@@ -47,9 +48,13 @@ def hand_logp(params, h, sigma_m, observed, sigma, use, observation_model):
     # theta_min in the model follows from h; make the numpy run use the same value.
     theta_min = values["theta_lit"] * h / (1 - h)
     reference = run(type(params)(**{**params.as_arrays(), "theta_min": theta_min}),
-                    DRIVERS, latitude_deg=LAT)
+                    DRIVERS, latitude_deg=LAT, cold=cold)
 
     total = sum(prior_logp(name, value) for name, value in values.items())
+    if cold is not None:
+        # The model samples each threshold as a Beta(2, 2) fraction of its range.
+        for value, (low, high, a, b) in zip(cold, COLD_PRIORS.values()):
+            total += stats.beta(a, b).logpdf((value - low) / (high - low))
     total += stats.dirichlet(list(DIRICHLET_ALPHA.values())).logpdf(shares)
     rs = steady_state_ratio(reference.pools_in["c_fol"], reference.pools_out["c_fol"],
                             reference.pools_yearly["c_fol"].mean(), reference.pools_start["c_fol"])
@@ -60,6 +65,9 @@ def hand_logp(params, h, sigma_m, observed, sigma, use, observation_model):
         sd = np.sqrt(sd**2 + sigma_m**2)
     total += stats.norm(reference.nee[use], sd).logpdf(observed[use]).sum()
     point = {**values, "shares": shares, "sigma_m": sigma_m}
+    if cold is not None:
+        for value, (name, (low, high, _, _)) in zip(cold, COLD_PRIORS.items()):
+            point[f"{name}_fraction"] = (value - low) / (high - low)
     return float(total), point
 
 
@@ -141,3 +149,14 @@ def test_fixed_parameters_are_constants_and_drop_out_of_the_prior():
     assert model_logp(model, free) == pytest.approx(expected - prior_logp("lma", 185.0), rel=1e-9)
     with pytest.raises(ValueError, match="fixed"):
         build_model(DRIVERS, observed, sigma, use, latitude_deg=LAT, fixed={"not_a_parameter": 1.0})
+
+
+def test_cold_limit_model_equals_hand_computation():
+    """D55: with the cold limit, the log posterior still equals the hand computation
+    (numpy model with the cold limit, plus the two threshold priors)."""
+    observed, sigma, use = fake_observations(median_parameters())
+    model = build_model(DRIVERS, observed, sigma, use, latitude_deg=LAT,
+                        observation_model="randunc_plus_model_error", cold_limit=True)
+    expected, point = hand_logp(median_parameters(), 0.2, 0.4, observed, sigma, use,
+                                "randunc_plus_model_error", cold=(-6.0, 5.0))
+    assert model_logp(model, point) == pytest.approx(expected, rel=1e-9)

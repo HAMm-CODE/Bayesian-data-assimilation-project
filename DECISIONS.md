@@ -522,16 +522,37 @@ Following F12 and D40 ("change only the priors linked to failure, with a stated 
 | S1 | `lma` (185 g C m-2), `c_lf` (0.262, needles about 3.8 years) | the canopy's freedom to become thin and short-lived |
 | S2 | S1 + `ceff` (10, REFLEX median) | also the freedom to make leaves very efficient; GPP size then follows the weather and the fixed canopy |
 | S3 | S1 + leaf calendar `d_onset`, `cr_onset`, `d_fall`, `cr_fall` | also the timing of needle flush and fall |
+| S4 | S1 + the starting pools NEE cannot inform: `c_woo_0` (5,900), `c_roo_0` (238), `c_som_0` (6,100), all from site measurements (D39) | the pool/rate trade-offs of F16: with the pool fixed at its measured size, NEE can inform the turnover rate |
 
-S1 and S2 are tested first (quick runs, real NEE 1997-1998, model error on).
+S1, S2 and S4 are tested first (quick runs, real NEE 1997-1998, model error on). S4 was added on 2026-10-16 at the author's request. Note: `research_plan_v2.md` already describes the model as "a reduced DALEC model", so a simpler version is in line with the original plan.
 
 **Other simplifications considered:**
-- *Fixing the parameters NEE cannot inform* (F16: `c_woo_0`; the root and soil pool/rate pairs). Helps the sampler, not the canopy problem; kept for later.
-- *A structurally simpler DALEC:* the evergreen DALEC of Williams et al. (2005), with no labile pool and no leaf-timing pulses, only a constant needle loss rate. It cannot build a seasonal canopy at all. (An evergreen DALEC comparison was earlier dropped as an RQ3 plan; here it would be a simplification of the model, not a comparison.) Bigger change: new model code and new checks.
+- *A structurally simpler DALEC:* the evergreen DALEC of Williams et al. (2005), with no labile pool and no leaf-timing pulses, only a constant needle loss rate. It cannot build a seasonal canopy at all. (An evergreen DALEC comparison was earlier dropped as an RQ3 plan; here it would be a simplification of the model, not a comparison.) Bigger change: new model code and new checks. **Not chosen** (author, 2026-10-16): DALEC2 stays as the model structure.
 
 **The expansion alternative, for comparison (not chosen yet):** DALEC2cold (Stettz et al. 2022) multiplies GPP by a cold scalar on minimum temperature: 0 below T0, 1 above Tg, a straight line in between, with T0 and Tg calibrated (at Niwot Ridge T0 = -7.1 +/- 1.1 C, Tg = 6.0 +/- 2.6 C). Two extra parameters. Stettz et al. had no LAI constraint and note that their site's LAI is roughly constant through the season; they did not test whether baseline DALEC2 compensated through the canopy.
 
 **How each version is judged (fixed before running), with `diagnose_chains.py`:** do the chains agree; are the remaining sampled parameters believable (Tier 2 and log prior); how large sigma_m becomes (a larger value means more misfit admitted openly); the canopy swing (lowest / highest LAI); and the average misfit by season (script 05, part 5). Preferred: the least-fixed version whose remaining parameters are believable. All versions are reported.
+
+### D55. Expansion test: a cold limit on photosynthesis, "DALEC2cold" (Decided as a test, 2026-10-16)
+**Why.** F18 and F20: with model error the computation is fine, but every version of DALEC2 makes up for the missing winter shutdown of photosynthesis through whatever canopy parameters are free, and fixing them all only worsens the fit. The predictive checks show the cause directly: too much uptake in spring, too much release in winter. Gelman et al. (2020, Sections 2.2, 7 and 10) treat adding a missing process as the normal response to a misfit that matters for the questions asked.
+
+**What.** Stettz et al. (2022), DALEC2 at an evergreen subalpine conifer forest: GPP is multiplied by
+
+    g(Tmin) = 0 at or below t_shutdown;  1 at or above t_full;  (Tmin - t_shutdown) / (t_full - t_shutdown) in between
+
+with both thresholds calibrated. Here Tmin is the daily minimum (the model is daily; Stettz et al. used monthly values).
+- **Priors** (`COLD_PRIORS` in `priors.py`, revised 2026-10-16 to follow the official code): `t_shutdown` lies in -15 to 0 degC and `t_full` in 0 to 15 degC, the ranges of `PARS_INFO_831.c`. The ranges do not overlap, so `t_full` can never fall below `t_shutdown`. The official prior is flat over each range; here each threshold is a Beta(2, 2) fraction of its range (same range, smooth, most weight in the middle, no hard walls for NUTS; D33). (First version, replaced: `t_shutdown ~ Normal(-7, 3)`, `t_full = t_shutdown + gap`, gap about 7 to 24 degC.)
+- **Code:** `cold_multiplier` (`acm.py`), `run(..., cold=...)` (numpy), `build_forward(..., cold=...)` (PyTensor), `build_model(..., cold_limit=True)`, `--cold` in script 05; the posterior checks and `diagnose_chains.py` apply it too. **Tested:** PyTensor equals numpy to 1e-10; the gradient with respect to a threshold matches a numerical slope; the full log posterior equals the hand computation; the ramp is right at both thresholds (58 tests in total).
+
+**First test:** a quick fit (real NEE 1997-1998, model error, nothing fixed), judged like F18 and F20: do the chains agree; is the forest believable (Tier 2, log prior, peak LAI, `ceff`, `f_fol`); the model error sigma_m; the seasonal misfit. **If the canopy becomes believable**, the cold-limit model goes through the full workflow before it is used for results: prior predictive check (script 03), fake-data check (script 04), then the full real-data fit. If not, it is reported as tried.
+
+**Source checked: the paper and the official code (2026-10-16).** Stettz et al. (2022), Eqs. (1) and (2), and their code release CARDAMOM-FluxVal v1.0 (Yang et al. 2021, Zenodo doi:10.5281/zenodo.4904195), which contains CARDAMOM v2.2. The cold limit is in `C/projects/CARDAMOM_MODELS/DALEC/DALEC_831/DALEC_831.c`, lines 166 to 188, marked "SGS 7/17/19: Temp scaling factor" (S. G. Stettz). Checked line by line:
+- **Same as ours:** the ramp (0 below `Tminmin`, 1 above `Tminmax`, straight line between); the temperature is the time step's minimum (`MET[m+1]`; monthly in their study, daily here); the factor multiplies GPP only (line 188).
+- **Priors:** `PARS_INFO_831.c`, parameters 33 and 34: 258.15 to 273.15 K and 273.15 to 288.15 K, i.e. -15 to 0 and 0 to 15 degC, flat. Adopted as ranges (above).
+- **A quirk not copied:** the code stores the thresholds as whole numbers (`int Tminmin = pars[33] - 273.15;`), which rounds them to whole degrees towards zero. Harmless for their Metropolis sampler, which uses no gradients; NUTS needs smooth gradients, so our thresholds stay continuous.
+- **Not copied either:** DALEC_831 is built on a richer DALEC than DALEC_400 (a soil-water bucket limiting GPP, evapotranspiration, fire, a sampled labile lifespan, respiration relative to the site mean temperature with a precipitation factor). Only the cold limit is taken; our base model stays DALEC_400 (D21 to D31).
+
+**Not part of DALEC2 as published;** a stated model change, reported next to the unchanged model (F17 to F20).
 
 ## Part 3. Likelihood
 
@@ -702,6 +723,22 @@ Implementation (planned): the observation model will be a config setting (`randu
 - **But 13 divergences in 4,000 draws** (0.3%), so D49 criterion 1 fails and D52 criterion 1 fails. R-hat (largest 1.005) and effective sample sizes (at least 592) pass.
 - **Verdict under the rule fixed in advance: dense is not adopted; the diagonal setting stays.** The divergences most likely come from the much larger step size in a few curved regions; the usual remedy is a higher `target_accept` (smaller steps). That is a new test, D53, not a reinterpretation of D52.
 
+**F20. Quick fits of the simpler models S1, S2, S4 (D54; real NEE 1997-1998, model error on; Roihu jobs 2350529 to 2350531, 2026-10-16).**
+
+| Version | Chains agree? | Log prior | Peak LAI | Annual GPP | `ceff` | `f_fol` | sigma_m | Log-likelihood |
+|---|---|---|---|---|---|---|---|---|
+| nothing fixed (F18) | yes | -89 | 0.9 | 1,020 | about 110 | 0.08 | 0.59 | -589 |
+| S1: `lma`, `c_lf` fixed | yes | -87 | 1.0 | 1,180 | about 105 | **0.015** | 0.65 | -643 |
+| S2: + `ceff` = 10 | yes | -43 | **8** | **1,840** | 10 (fixed) | 0.07 | 0.80 | -755 |
+| S4: S1 + three pools fixed | yes | -84 | 1.0 | 1,170 | about 104 | 0.016 | 0.65 | -643 |
+
+(Log prior of a typical prior draw about -22; fixed parameters enter it at their median. Site values: peak LAI 2.5 to 4, GPP 952 to 1,104; `f_fol` prior median 0.07.)
+- **No version is a believable forest; the compensation moves to whatever is still free.** With `lma` and `c_lf` fixed, the fit keeps the canopy thin by starving the foliage of allocation (`f_fol` 0.015, a fifth of the prior) and keeps `ceff` about ten times its prior. With `ceff` also fixed, the canopy instead grows to LAI 8 and GPP to about 1,800, and the fit to the data gets clearly worse (log-likelihood 110 lower, model error 0.80).
+- **Fixing the poorly informed pools (S4) changes nothing:** the problem is in the canopy, not the pools.
+- **The same seasonal misfit in all three** (predictive checks, part 5): coverage of the 90% interval about 89% overall, but 100% in winter and about 79% in summer, so one constant model error is too wide in winter and too narrow in summer. Average observed minus model: **spring +0.17 to +0.29** (the model takes up too much CO2 in spring: the D51 expectation, confirmed) and **winter -0.19 to -0.29** (the model releases too much in winter).
+- **Caveat on the canopy-swing number** (F18): in these short fits the foliage pool also grows strongly over the two years (soft foliage term -1.4 to -3.4), which lowers "lowest / highest LAI in a year" on its own. `diagnose_chains.py` now also prints the foliage pool's end / start ratio, so trend and seasonality can be told apart.
+- **Reading.** Simplifying removes freedom but not the cause: whichever canopy parameters stay free absorb the missing cold shutdown, and fixing all of them turns the gap into a worse fit instead. This points to a structural gap in DALEC2 at this site (the model cannot shut photosynthesis down in winter and early spring), which is what the expansion route (a cold limit on GPP, Stettz et al. 2022) would address. It is also an RQ3 result in its own right: NEE alone cannot tell canopy size, leaf efficiency and allocation apart when the model structure is wrong.
+
 ---
 
 ## Part 5. Open items
@@ -713,12 +750,13 @@ Implementation (planned): the observation model will be a config setting (`randu
 **OPEN-3. Spring onset number.** The previous EDA found a median observed onset of day 96 (range 58 to 117) with the 10-day rule, while project notes mention an observed onset of day 110 in the model comparison. The new code gives a median of day 100 (range 66 to 137) for 1997-2010 (F10), so three numbers now exist. These probably come from different definitions or data. Pick one definition (D16 uses the 10-day rule) and use it consistently in the thesis.
 
 **OPEN-6. Small checks still to do** (none blocks the next step):
-- D31: read the printed equation A9 in the Bloom and Williams (2015) PDF, to tell a paper typo from a copying error in the previous repository.
+- D31: read the printed equation A9 in the Bloom and Williams (2015) PDF. **Narrowed 2026-10-16:** a text extraction of the PDF reads A9 as `2 sqrt(pi) log(1 - c_lf) psi - exp(-psi^2) = 0`, i.e. the previous repository's form. Text extraction loses fraction bars, so one look at the typeset PDF settles it: if `log(1 - c_lf)` sits *under* `2 sqrt(pi) psi` as a fraction, the paper matches the official code and the previous repository mis-copied it; if it is a product on the same line, the paper has a typo. Either way the model follows the code (D31).
 - D37: confirm the leaf onset timing (Schiestl-Aalto et al. 2013 or Schiestl-Aalto 2017) and the needle fall timing (monthly litterfall data).
 - F9: confirm the length of the frozen-soil season at Hyytiala from the soil temperature data (the previous notes say about four to six months).
-- D19: correct `research_plan_v2.md`, which still lists `VPD_F` as a driver.
+- ~~D19: correct `research_plan_v2.md`, which still lists `VPD_F` as a driver.~~ Done 2026-10-16: the driver paragraph now lists the D19 inputs and says why VPD and precipitation are not used.
 - D2: add `pymc`, `pytest` and `netcdf4` to `environment.yml`; freeze `environment.lock.yml` before producing thesis results.
 - D44: raise with the supervisor that "no EDCs" became "a soft EDC on the foliage pool".
+- ~~D55: check the official cold-limit code and its priors.~~ Done 2026-10-16: found in DALEC_831 (CARDAMOM v2.2); see D55.
 - References marked "check" below: verify against the original papers.
 
 **OPEN-7. Choice of sampler.** NUTS as the only sampler is carried over from the previous repository. Its settings are now fixed (D49); a dense mass matrix is being tested (D52); other alternatives are not yet re-assessed. Decide after the fake-data run: if it is too slow on the author's machine, the options are running on Roihu, or nutpie (another NUTS implementation that PyMC can call, often faster and with better warm-up, `nuts_sampler="nutpie"`).
@@ -794,7 +832,7 @@ Not yet re-assessed:
 - Vehtari, A., Gelman, A., Simpson, D., Carpenter, B. and Burkner, P.-C. (2021). Rank-normalization, folding, and localization: an improved R-hat for assessing convergence of MCMC. Bayesian Analysis 16(2), 667-718.
 - Waring, R. H., Landsberg, J. J. and Williams, M. (1998). Net primary production of forests: a constant fraction of gross primary production? Tree Physiology 18, 129-134.
 - Williams, M. et al. (1997). Predicting gross primary productivity in terrestrial ecosystems. Ecological Applications 7(3), 882-894. (Cited for the frost rule, D24; the rule itself not yet found in it.)
-- Williams, M., Schwarz, P. A., Law, B. E., Irvine, J. and Kurpius, M. R. (2005). An improved analysis of forest carbon dynamics using data assimilation. Global Change Biology 11, 89-105. (The evergreen DALEC; details to check.)
+- Williams, M., Schwarz, P. A., Law, B. E., Irvine, J. and Kurpius, M. R. (2005). An improved analysis of forest carbon dynamics using data assimilation. Global Change Biology 11(1), 89-105. doi:10.1111/j.1365-2486.2004.00891.x (the evergreen DALEC; also the model reference of research_plan_v2.md).
 - Williams, M. et al. (2009). Improving land surface models with FLUXNET data. Biogeosciences 6, 1341-1359.
 - Yuan, Q. et al. (2025). Global carbon flux dataset generated by fusing remote sensing and multiple flux networks observation. Scientific Data.
 

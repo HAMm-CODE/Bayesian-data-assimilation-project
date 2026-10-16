@@ -117,6 +117,7 @@ def _step(g_c, exp_a8_tmax, dlf, sw_in, co2, frost, onset, fall, temp_rate,
 
 def build_forward(theta: dict[str, Any], drivers: Drivers, *, latitude_deg: float,
                   frost_threshold_degc: float | None = None,
+                  cold: tuple | None = None,
                   constants: AcmConstants = DALEC2_ACM) -> dict[str, Any]:
     """Build the DALEC2 graph for one parameter set.
 
@@ -134,8 +135,15 @@ def build_forward(theta: dict[str, Any], drivers: Drivers, *, latitude_deg: floa
     fall = _pulse(t, th["d_fall"], th["cr_fall"], 1.0 / th["c_lf"])
     temp_rate = pt.exp(th["temperature_exponent"] * t_mid)
 
+    limit = pt.as_tensor_variable(w["frost"])
+    if cold is not None:
+        # D55: GPP x clip((Tmin - t_shutdown) / (t_full - t_shutdown), 0, 1), for all days at once.
+        t_min = pt.as_tensor_variable(np.asarray(drivers.t_min, dtype=float))
+        t_shutdown, t_full = (pt.as_tensor_variable(np.float64(c)) if np.isscalar(c) else c
+                              for c in cold)
+        limit = limit * pt.clip((t_min - t_shutdown) / (t_full - t_shutdown), 0.0, 1.0)
     sequences = [pt.as_tensor_variable(w[k]) for k in
-                 ("g_c", "exp_a8_tmax", "day_length_factor", "sw_in", "co2", "frost")]
+                 ("g_c", "exp_a8_tmax", "day_length_factor", "sw_in", "co2")] + [limit]
     sequences += [onset, fall, temp_rate]
     initial = [th[f"{name}_0"] for name in POOLS]
     acm_constants = [pt.as_tensor_variable(np.float64(getattr(constants, k)))

@@ -61,3 +61,25 @@ def test_gradient_matches_finite_difference(name):
         return run(median_parameters(**{name: value}), DRIVERS, latitude_deg=LAT).nee.sum()
     numeric = (total_nee(float(base[name]) + h) - total_nee(float(base[name]) - h)) / (2 * h)
     assert gradient == pytest.approx(numeric, rel=1e-4, abs=1e-8)
+
+
+def test_cold_limit_matches_numpy_and_has_right_gradient():
+    """D55: the PyTensor cold limit equals the numpy one, and d(total NEE)/d(threshold)
+    matches a numerical slope."""
+    params = median_parameters()
+    cold = (-5.0, 7.0)
+    reference = run(params, DRIVERS, latitude_deg=LAT, cold=cold)
+    graph = build_forward(params.as_arrays(), DRIVERS, latitude_deg=LAT,
+                          cold=(np.float64(cold[0]), np.float64(cold[1])))
+    nee = pytensor.function([], graph["nee"])()
+    assert np.allclose(nee, reference.nee, rtol=1e-10, atol=1e-10)
+
+    t0 = pt.dscalar("t0")
+    total = build_forward(params.as_arrays(), DRIVERS, latitude_deg=LAT,
+                          cold=(t0, np.float64(cold[1])))["nee"].sum()
+    gradient = pytensor.function([t0], pt.grad(total, t0))(cold[0])
+    h = 1e-5
+    def total_nee(value):
+        return run(params, DRIVERS, latitude_deg=LAT, cold=(value, cold[1])).nee.sum()
+    numeric = (total_nee(cold[0] + h) - total_nee(cold[0] - h)) / (2 * h)
+    assert gradient == pytest.approx(numeric, rel=1e-4, abs=1e-8)
