@@ -475,7 +475,8 @@ Following F12 and D40 ("change only the priors linked to failure, with a stated 
 **If it fails:** look for the cause before changing anything (Gelman et al. 2020, Section 5): divergences point to geometry (then consider the D27 reparameterisation or a higher `target_accept`); a truth outside a narrow interval points to a bug or a non-identified pair; record every change here.
 
 ### D50. Where the fake-data check runs: Roihu, with the existing container (Decided, 2026-10-13)
-- **Roihu, partition `small`**, account `project_2020170`: one node, 4 CPUs (one per chain), 32 GB, time limit 48 h (`small` allows 72 h; only the time used is billed). Raised from 24 h after the first full job timed out; the run took 29.4 h (F16). Job scripts: `jobs/fake_data_quick.sbatch`, `jobs/fake_data_full.sbatch`, shared set-up `jobs/roihu_setup.sh`.
+- **Roihu, partition `small`**, account `project_2020170`: one node, 4 CPUs (one per chain), 8 GB memory, time limit 48 h (`small` allows 72 h; only the time used is billed). Time raised from 24 h after the first full job timed out; the run took 29.4 h (F16).
+- **Memory, measured (2026-10-15):** Roihu bills a `small` job on whichever is larger, 0.75 BU per CPU-hour or 0.375 BU per GiB-hour of memory requested. The first full run asked for 32 GB but used 1.52 GB (`seff 2278889`), so it was billed on memory: 353 BU instead of about 88. Full jobs now ask for 8 GB (2 GB per CPU, where the two charges are equal; over 5 times the measured use) and quick jobs for 4 GB. CPU efficiency was 99%, so one CPU per chain is fully used and more CPUs would not speed up a chain. Job scripts: `jobs/fake_data_quick.sbatch`, `jobs/fake_data_full.sbatch`, shared set-up `jobs/roihu_setup.sh`.
 - **Python environment:** the Tykky container built for the previous repository (`/projappl/project_2020170/dalec-env`; Python 3.13, PyTensor 3.2.4, C++ compiler inside). Our code is not installed into it; it is found through `PYTHONPATH=src`, and the job stops if `dalec` would be loaded from anywhere else. **Checked:** all 53 tests pass with PyTensor 3.2.4. The PyMC and ArviZ versions in the container are printed at the start of every job.
 - **Why not a new container tonight:** building one takes time and the existing one already ran a model of the same size (3.9 h for 4 x 2,000 draws in the previous repository). A fresh container from `environment.yml` is the clean option before thesis results (D2, lock file).
 - **Order:** the quick job first; the full job is submitted with `--dependency=afterok`, so it starts only if the quick job finished without an error.
@@ -633,6 +634,19 @@ Implementation (planned): the observation model will be a config setting (`randu
 - **Cost:** 29.4 h on 4 CPUs (52.9 s per draw). The step size settled at about 0.005 and almost every draw used the maximum 1,023 gradient evaluations (92 of 4,000 hit the maximum tree depth, which wastes time but does not bias the result). Likely cause: the posterior is very narrow in some directions (temperature exponent, `ceff`, `d_onset`) and has long sloping ridges in others (the pool and rate pairs), which a diagonal mass matrix cannot straighten out. The first job with a 24 h limit (2278575) timed out, so D50's limit was raised to 48 h.
 - **What it allows:** the code and sampler recover a known answer, so a real-data fit with the same settings can be trusted computationally (Gelman et al. 2020, Section 4.1).
 
+**F17. First contact with the real NEE: the quick fit leaves the believable region (D51; Roihu job 2316333 and `diagnose_chains.py`, 2026-10-16).** Two short chains on 1997-1998 (622 assimilable days); a quick run, so nothing is final, but the pattern is clear.
+- **The chains disagree completely** (largest R-hat 2.54, effective sample size about 3), unlike the fake-data quick run (R-hat 1.03).
+- **Neither chain is a believable forest.** A typical draw from the prior has a log prior of about -22, and only 1 in 1,000 is below -37. Chain 0 sits at -384 and chain 1 at -998.
+  - Chain 0 passes Tier 1 but not Tier 2: needles living about 1.3 years (`c_lf` 0.79; prior 3 to 5 years), `ceff` 247 (prior 5 to 20), a starting foliage pool of 10 g C m-2 (prior about 590), peak LAI 1.2 (site 2.5 to 4), temperature exponent 0.097 (Q10 about 2.6; prior 1.2 to 2.0), starting soil pool 1,313 (prior about 6,100).
+  - Chain 1 is physically impossible (peak LAI 32, annual GPP 2,868).
+- **Which chain the model prefers:** chain 0, by 1,899 log units; it also fits the data better, by 1,114.
+- **Reading.** Two problems, one on top of the other:
+  1. **A model problem (Gelman et al. 2020, Section 5.1).** Both chains started from believable prior draws (D45) and moved away from them, and the better chain paid about 360 log units of prior to gain fit. So the data prefer an unbelievable forest over any believable one. The likelihood is worth thousands of log units and the priors hundreds, because RANDUNC is small and the model cannot match the daily NEE within it (structural misfits F12, F13). The data overwhelm the priors.
+  2. **Separate modes (Section 5.6).** Chain 1 sits in a region about 1,900 log units worse and did not leave it: a computational symptom of the same rugged posterior.
+- **The fake-data check (F16) is what makes this reading possible:** the same code and sampler recovered a known forest when the model was true, so the failure here points to the mismatch between DALEC2 and the real data, not to a bug.
+- **Correction:** the first version of `diagnose_chains.py` called chain 0 "believable" because it passed Tier 1. That was too weak a test; the script now also requires Tier 2 and a log prior within the range of real prior draws.
+- **Next:** open, see OPEN-8.
+
 ---
 
 ## Part 5. Open items
@@ -653,6 +667,8 @@ Implementation (planned): the observation model will be a config setting (`randu
 - References marked "check" below: verify against the original papers.
 
 **OPEN-7. Choice of sampler.** NUTS as the only sampler is carried over from the previous repository. Its settings are now fixed (D49); a dense mass matrix is being tested (D52); other alternatives are not yet re-assessed. Decide after the fake-data run: if it is too slow on the author's machine, the options are running on Roihu, or nutpie (another NUTS implementation that PyMC can call, often faster and with better warm-up, `nuts_sampler="nutpie"`).
+
+**OPEN-8. How to respond to F17 (real NEE pulls the parameters out of the believable region).** Options, all already recorded as planned changes, none tuned to the result: (a) add model error to sigma (L1 option C, Gelman et al. 2020, Sections 7.1 and 10.5), so the likelihood stops treating DALEC2 as able to match each day within RANDUNC; (b) the frost switch (D24), aimed at the spring misfit; (c) both; (d) a Laplace error (L2). Plan: quick fits of (a), (b) and (c) first, each judged with `diagnose_chains.py` (are the chains believable and do they agree?). Gelman et al. (2020, Section 5.9) warn against "haphazardly tweaking the model until computational problems disappear", so every option must have its own reason, and all results are reported, not only the one that works.
 
 ### Planned sensitivity runs (decided in principle, to run after the main fit)
 

@@ -30,7 +30,7 @@ from dalec.inference import SHARES
 from dalec.model_numpy import Parameters, drivers_from_frame, run
 from dalec.plausibility import evaluate, summarise_batch
 from dalec.plotting import heading
-from dalec.priors import PRIORS, edc_log_weight, log_prior, steady_state_ratio
+from dalec.priors import PRIORS, edc_log_weight, log_prior, sample_prior, steady_state_ratio
 
 SHOW = ("ceff", "lma", "c_lf", "f_auto", "f_fol", "temperature_exponent", "c_fol_0", "c_som_0")
 
@@ -81,7 +81,8 @@ def main() -> None:
         soft = edc_log_weight(rs)
         prior = log_prior(raw)
         summary = summarise_batch(out, years)
-        tier1 = evaluate(summary)["tier1_fail"]
+        checks = evaluate(summary)
+        tier1 = checks["tier1_fail"]
         row = {
             "chain": c,
             "log-likelihood": np.median(log_lik),
@@ -90,6 +91,7 @@ def main() -> None:
             "log posterior": np.median(log_lik + prior + soft),
             "sampler lp": np.median(sampler_lp[c]),
             "impossible (Tier 1)": tier1.mean(),
+            "plausible (Tier 2)": checks["tier2_all"].mean(),
             "annual GPP": np.median(summary["gpp"]),
             "peak LAI": np.median(summary["peak_lai"]),
         }
@@ -100,11 +102,22 @@ def main() -> None:
     with pd.option_context("display.width", 200, "display.max_columns", 30):
         print(table.T.to_string(float_format=lambda v: f"{v:.4g}"))
 
+    # How believable is "believable"? The log prior of draws from the prior itself.
+    _, prior_draws = sample_prior(20_000, np.random.default_rng(1))
+    reference = log_prior(prior_draws)
+    floor = float(np.percentile(reference, 0.1))
     heading("Reading it")
+    print(f"  log prior of draws from the prior itself: median {np.median(reference):.1f}; "
+          f"only 1 in 1,000 is below {floor:.1f}")
+    believable = ((table["impossible (Tier 1)"] < 0.5) & (table["plausible (Tier 2)"] >= 0.5)
+                  & (table["log prior"] >= floor))
+    for c in table.index:
+        verdict = "believable" if believable[c] else "NOT believable"
+        print(f"  chain {c}: {verdict} (Tier 1 impossible {table.loc[c, 'impossible (Tier 1)']:.0%}, "
+              f"Tier 2 plausible {table.loc[c, 'plausible (Tier 2)']:.0%}, "
+              f"log prior {table.loc[c, 'log prior']:.0f})")
     best = table["log posterior"].idxmax()
-    believable = table["impossible (Tier 1)"] < 0.5
-    print(f"  highest log posterior: chain {best} "
-          f"({'believable' if believable[best] else 'physically impossible'} forest)")
+    print(f"  highest log posterior: chain {best}")
     for c in table.index:
         if c == best:
             continue
@@ -113,13 +126,14 @@ def main() -> None:
         print(f"  chain {c}: log posterior {gap_post:.1f} lower than chain {best}; its fit to the "
               f"data (log-likelihood) is {abs(gap_lik):.1f} {'worse' if gap_lik > 0 else 'better'}")
     if not believable[best]:
-        print("  -> the data prefer an impossible forest: story 2 (a model problem, Section 5.1).")
-    elif not believable.all():
-        print("  -> a believable chain is best, so the impossible chain(s) look stuck: story 1 "
-              "(a sampling problem).")
-    else:
-        print("  -> every chain describes a believable forest; compare their parameters for "
-              "separate modes.")
+        print("  -> the best chain is not a believable forest: the data pull the parameters far "
+              "from the priors (story 2, a model problem, Section 5.1).")
+    gaps = table.loc[best, "log posterior"] - table["log posterior"]
+    if (gaps > 10).any():
+        print("  -> some chains sit in clearly poorer regions than the best one (log posterior "
+              "more than 10 lower): separate modes (Section 5.6), on top of any model problem.")
+    if believable.all():
+        print("  -> every chain is believable; compare their parameters for separate modes.")
     print("  (Differences of a few units are noise; tens to thousands are decisive.)")
 
 
