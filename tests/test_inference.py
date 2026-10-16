@@ -160,3 +160,16 @@ def test_cold_limit_model_equals_hand_computation():
     expected, point = hand_logp(median_parameters(), 0.2, 0.4, observed, sigma, use,
                                 "randunc_plus_model_error", cold=(-6.0, 5.0))
     assert model_logp(model, point) == pytest.approx(expected, rel=1e-9)
+
+
+def test_fixed_parameters_with_cold_limit():
+    """D56: fixing parameters and the cold limit work together: the fixed ones become
+    constants, the two cold thresholds are still sampled, and the model can be evaluated."""
+    observed, sigma, use = fake_observations(median_parameters())
+    fixed = {"lma": 185.0, "c_lf": 0.2621, "ceff": 10.0}
+    model = build_model(DRIVERS, observed, sigma, use, latitude_deg=LAT,
+                        observation_model="randunc_plus_model_error", cold_limit=True, fixed=fixed)
+    free = {rv.name for rv in model.free_RVs}
+    assert not free & set(fixed)
+    assert {"cold_t_shutdown_fraction", "cold_t_full_fraction"} <= free
+    assert np.isfinite(model.compile_logp()(model.initial_point()))

@@ -554,6 +554,19 @@ with both thresholds calibrated. Here Tmin is the daily minimum (the model is da
 
 **Not part of DALEC2 as published;** a stated model change, reported next to the unchanged model (F17 to F20).
 
+### D56. Is the thin canopy forced by the data, or only allowed by them? (Decided as a test, 2026-10-16)
+**Why.** F21: the cold limit fixed the winter shrinking of the canopy and improved the fit, but the canopy stays thin (peak LAI about 1) with very efficient leaves (`ceff` about 110) and heavy leaves (`lma` about 435). Two readings are possible. (a) NEE barely tells a thin, efficient canopy from a full, ordinary one (equifinality), and the fit drifts to the thin one for small gains; then holding the canopy at believable values costs little fit. (b) The data clearly prefer the thin canopy, because something else in the model is missing or wrong; then holding the canopy costs a lot of fit.
+
+**What.** Two quick fits (real NEE 1997-1998, model error, cold limit), compared with the free cold fit of F21 (log-likelihood about -509):
+- `--cold --fix lma,c_lf,ceff`: canopy held at believable values (S2 of D54 plus the cold limit).
+- `--cold --fix ceff`: only leaf efficiency held at the REFLEX median 10.
+
+**How it is judged (fixed before running):** the drop in log-likelihood against the free cold fit, together with sigma_m.
+- Drop under about 10: reading (a). NEE cannot pin down the canopy; the believable canopy is kept (fixed, or with priors that carry the site knowledge), and this is an RQ3 result.
+- Drop over about 30: reading (b). The data prefer the thin canopy; the next suspects are the canopy part of the model (the ACM response to LAI and ceff), or adding LAI observations as a second data stream.
+- In between: no clear answer from quick fits; decided on full fits with a proper comparison (PSIS-LOO, Vehtari et al. 2017).
+(For scale: S2 without the cold limit lost about 110 against S1, F20.) This is a diagnostic comparison of quick fits, not a formal model choice.
+
 ## Part 3. Likelihood
 
 ### L1. Observation model: what sigma is (Decided, 2026-10-08; main model changed 2026-10-16)
@@ -741,6 +754,26 @@ Implementation (planned): the observation model will be a config setting (`randu
 
 ---
 
+**F21. Quick fit with the cold limit (D55; real NEE 1997-1998, model error on, nothing fixed; 2026-10-16).** Compared with the same fit without the cold limit (F18):
+
+| | Without cold limit (F18) | With cold limit |
+|---|---|---|
+| Chains agree? | yes | yes (log posterior 1.1 apart) |
+| Log prior | -89 / -90 | -68 / -68 |
+| Model error sigma_m | 0.59 | 0.51 |
+| Lowest / highest LAI in a year | 0.40 | 0.61 (believable prior forests 0.69 to 0.83) |
+| `f_fol` | not printed then (0.015 to 0.017 in S1 and S4, F20) | 0.071 (prior median about 0.07) |
+| Peak LAI | about 1 | 1.07 |
+| `ceff` | about 110 | 110 |
+| `lma` | 400 to 460 | 425 to 445 |
+| Annual GPP | about 1,020 | about 1,090 |
+
+Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily minimum).
+- **What the cold limit fixed:** the fit is better (sigma_m 14% smaller), the canopy no longer shrinks much in winter, foliage allocation is at its prior (it was starved in S1 and S4), and the log prior improves by about 21.
+- **What it did not fix:** the canopy is still thin, with very efficient and heavy leaves. Still not a believable forest (Tier 2: 0%; log prior far below the 1-in-1,000 prior floor of -37).
+- **Correction to F18:** F18 read the whole implausible canopy as imitating the missing winter shutdown. That explains the winter shrinking, but not the thin, efficient canopy, which stays with the cold limit in place. The cause of the thin canopy is open; D56 tests it.
+- Also seen: Q10 about 2.3 (`temperature_exponent` 0.084, prior median 0.034, i.e. Q10 1.4); `c_lf` about 0.35 (needles about 2.9 years, prior 3 to 5). Seasonal coverage: to be added from the job log.
+
 ## Part 5. Open items
 
 ### Still open
@@ -829,6 +862,7 @@ Not yet re-assessed:
 - Suni, T. et al. (2003). Air temperature triggers the recovery of evergreen boreal forest photosynthesis in spring. Global Change Biology 9, 1410-1426. (Details to check.)
 - Tramontana, G. et al. (2016). Predicting carbon dioxide and energy fluxes across global FLUXNET sites with regression algorithms. Biogeosciences 13, 4291.
 - Tuomi, M. et al. (2009). Leaf litter decomposition: estimates of global variability based on Yasso07 model. Ecological Modelling 220, 3362-3371. (Cited via the previous repository; check.)
+- Vehtari, A., Gelman, A. and Gabry, J. (2017). Practical Bayesian model evaluation using leave-one-out cross-validation and WAIC. Statistics and Computing 27(5), 1413-1432.
 - Vehtari, A., Gelman, A., Simpson, D., Carpenter, B. and Burkner, P.-C. (2021). Rank-normalization, folding, and localization: an improved R-hat for assessing convergence of MCMC. Bayesian Analysis 16(2), 667-718.
 - Waring, R. H., Landsberg, J. J. and Williams, M. (1998). Net primary production of forests: a constant fraction of gross primary production? Tree Physiology 18, 129-134.
 - Williams, M. et al. (1997). Predicting gross primary productivity in terrestrial ecosystems. Ecological Applications 7(3), 882-894. (Cited for the frost rule, D24; the rule itself not yet found in it.)
