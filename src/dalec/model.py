@@ -118,12 +118,15 @@ def _step(g_c, exp_a8_tmax, dlf, sw_in, co2, frost, onset, fall, temp_rate,
 def build_forward(theta: dict[str, Any], drivers: Drivers, *, latitude_deg: float,
                   frost_threshold_degc: float | None = None,
                   cold: tuple | None = None,
+                  a7=None,
                   constants: AcmConstants = DALEC2_ACM) -> dict[str, Any]:
     """Build the DALEC2 graph for one parameter set.
 
     `theta` maps every field of model_numpy.Parameters to a scalar tensor (or a
     float). Returns tensors: daily `gpp` and `nee`, the pool trajectories
     `pools` (days + 1, 6; row 0 is the start), and `foliage_rs` for D44.
+    `cold` = (t_shutdown, t_full) adds the cold limit (D55); `a7` replaces the
+    fixed ACM light-use efficiency with a value or tensor (D58 diagnostic).
     """
     th = {k: pt.as_tensor_variable(np.float64(v)) if np.isscalar(v) else pt.cast(v, "float64")
           for k, v in theta.items()}
@@ -148,6 +151,8 @@ def build_forward(theta: dict[str, Any], drivers: Drivers, *, latitude_deg: floa
     initial = [th[f"{name}_0"] for name in POOLS]
     acm_constants = [pt.as_tensor_variable(np.float64(getattr(constants, k)))
                      for k in ("a3", "a4", "a7", "a9")]
+    if a7 is not None:                                   # D58: a sampled light-use efficiency
+        acm_constants[2] = pt.as_tensor_variable(np.float64(a7)) if np.isscalar(a7) else a7
     non_sequences = [th[k] for k in STEP_PARAMETERS] + acm_constants
 
     result = pytensor.scan(

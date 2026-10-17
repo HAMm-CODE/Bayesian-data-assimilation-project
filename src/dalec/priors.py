@@ -61,6 +61,21 @@ COLD_PRIORS: dict[str, tuple] = {   # name: (range low, range high, beta a, beta
     "cold_t_full": (0.0, 15.0, 2.0, 2.0),        # full photosynthesis at or above
 }
 
+# D58 diagnostic: the ACM's maximum canopy light-use efficiency `a7`, fixed at the
+# Loobos value 7.19298 in DALEC2 (D22), estimated instead. No boreal value exists
+# to centre the prior on, so it is centred on the fixed value and kept wide:
+# 95% roughly 2.7 to 19 (a factor of about 2.7 either way). Used only with
+# --free-a7; kept out of PRIORS like the cold thresholds.
+ACM_PRIORS: dict[str, tuple] = {
+    "acm_a7": ("lognormal", 7.19298, 0.5),
+}
+
+
+def sample_acm(n: int, rng: np.random.Generator) -> dict[str, np.ndarray]:
+    """Draw the sampled ACM coefficient(s) of the D58 diagnostic."""
+    return {name: _draw(*spec, n, rng) for name, spec in ACM_PRIORS.items()}
+
+
 # Priors that differ in the cold-limit model. D57 tested returning `ceff` to its
 # first prior (D38: median 16.5, sdlog 0.41) and it FAILED its prior predictive
 # check (F24: 18.7% of draws with daily GPP above 20), so under the rule fixed in
@@ -191,6 +206,8 @@ def to_prior_scale(name: str, values) -> np.ndarray:
     log-normal priors, logit for fractions (beta priors and the four allocation
     shares), unchanged for normal priors. Used to compare spreads fairly."""
     values = np.asarray(values, dtype=float)
+    if name in ACM_PRIORS:           # log scale (D58)
+        return np.log(values)
     if name in COLD_PRIORS:          # a fraction of its range (D55)
         low, high = COLD_PRIORS[name][:2]
         v = np.clip((values - low) / (high - low), 1e-12, 1 - 1e-12)

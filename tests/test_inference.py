@@ -8,7 +8,7 @@ from scipy import stats
 from dalec.inference import SHARES, build_model, initial_values
 from dalec.model_numpy import run
 from dalec.priors import (
-    C_LF_RANGE, COLD_PRIORS, DIRICHLET_ALPHA, PRIORS, edc_log_weight, log_prior, sample_prior,
+    ACM_PRIORS, C_LF_RANGE, COLD_PRIORS, DIRICHLET_ALPHA, PRIORS, edc_log_weight, log_prior, sample_prior,
     priors_for, steady_state_ratio,
 )
 from test_model_numpy import LAT, median_parameters, synthetic_drivers
@@ -38,7 +38,7 @@ def fake_observations(params, seed=1):
     return observed, sigma, use
 
 
-def hand_logp(params, h, sigma_m, observed, sigma, use, observation_model, cold=None):
+def hand_logp(params, h, sigma_m, observed, sigma, use, observation_model, cold=None, a7=None):
     """Priors + D44 term + likelihood, computed with scipy and the numpy model.
     `cold` = (t_shutdown, t_full) adds the D55 cold limit, its two priors, and the
     cold model's prior list (D57)."""
@@ -49,7 +49,7 @@ def hand_logp(params, h, sigma_m, observed, sigma, use, observation_model, cold=
     # theta_min in the model follows from h; make the numpy run use the same value.
     theta_min = values["theta_lit"] * h / (1 - h)
     reference = run(type(params)(**{**params.as_arrays(), "theta_min": theta_min}),
-                    DRIVERS, latitude_deg=LAT, cold=cold)
+                    DRIVERS, latitude_deg=LAT, cold=cold, a7=a7)
 
     priors = priors_for(cold is not None)    # the cold model has its own ceff prior (D57)
     total = sum(prior_logp(name, value, priors) for name, value in values.items())
@@ -57,6 +57,9 @@ def hand_logp(params, h, sigma_m, observed, sigma, use, observation_model, cold=
         # The model samples each threshold as a Beta(2, 2) fraction of its range.
         for value, (low, high, a, b) in zip(cold, COLD_PRIORS.values()):
             total += stats.beta(a, b).logpdf((value - low) / (high - low))
+    if a7 is not None:      # D58: log-normal prior on the ACM light-use efficiency
+        _, median, sdlog = ACM_PRIORS["acm_a7"]
+        total += stats.lognorm(s=sdlog, scale=median).logpdf(a7)
     total += stats.dirichlet(list(DIRICHLET_ALPHA.values())).logpdf(shares)
     rs = steady_state_ratio(reference.pools_in["c_fol"], reference.pools_out["c_fol"],
                             reference.pools_yearly["c_fol"].mean(), reference.pools_start["c_fol"])
@@ -67,6 +70,8 @@ def hand_logp(params, h, sigma_m, observed, sigma, use, observation_model, cold=
         sd = np.sqrt(sd**2 + sigma_m**2)
     total += stats.norm(reference.nee[use], sd).logpdf(observed[use]).sum()
     point = {**values, "shares": shares, "sigma_m": sigma_m}
+    if a7 is not None:
+        point["acm_a7"] = a7
     if cold is not None:
         for value, (name, (low, high, _, _)) in zip(cold, COLD_PRIORS.items()):
             point[f"{name}_fraction"] = (value - low) / (high - low)
@@ -175,3 +180,15 @@ def test_fixed_parameters_with_cold_limit():
     assert not free & set(fixed)
     assert {"cold_t_shutdown_fraction", "cold_t_full_fraction"} <= free
     assert np.isfinite(model.compile_logp()(model.initial_point()))
+
+
+def test_free_a7_model_equals_hand_computation():
+    """D58: with a7 sampled (and the cold limit on), the log posterior still equals
+    the hand computation, including the log-normal a7 prior."""
+    observed, sigma, use = fake_observations(median_parameters())
+    model = build_model(DRIVERS, observed, sigma, use, latitude_deg=LAT,
+                        observation_model="randunc_plus_model_error", cold_limit=True, free_a7=True)
+    assert "acm_a7" in {rv.name for rv in model.free_RVs}
+    expected, point = hand_logp(median_parameters(), 0.2, 0.4, observed, sigma, use,
+                                "randunc_plus_model_error", cold=(-6.0, 5.0), a7=3.5)
+    assert model_logp(model, point) == pytest.approx(expected, rel=1e-9)

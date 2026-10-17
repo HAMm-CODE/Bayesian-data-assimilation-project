@@ -588,6 +588,29 @@ with both thresholds calibrated. Here Tmin is the daily minimum (the model is da
 - Section 6.3: sensitivity analysis by "refitting the model with multiple priors". The cold fit with the D42 prior (F21) is kept and reported as that comparison.
 - **Stated openly:** this change was considered after seeing that the fit prefers high `ceff` (F21, F22). It is not a free choice of the best-fitting prior: it returns to a prior written down before any data were seen, for a reason recorded in D42 at the time, and it must pass a check that uses no tower data.
 
+### D58. Diagnostic: estimate the ACM light-use efficiency `a7` (Decided as a test, 2026-10-17)
+**Why.** F24 suggests that the thin canopy compensates for an ACM light-use efficiency that is too high for this site: `a7` = 7.19 is fixed at the value fitted at the temperate Loobos site (D22), and shrinking the canopy is the model's only way to lower it. If that is right, letting `a7` be estimated should give a normal canopy with a lower `a7` and an equally good fit.
+
+**What.** Cold-limit model (D55) with the main priors (D57 outcome), plus `a7` sampled: `acm_a7 ~ LogNormal(median 7.19298, sdlog 0.5)`, 95% about 2.7 to 19 (`ACM_PRIORS` in `priors.py`). No boreal value exists to centre it on, so it is centred on the fixed value and kept wide; the F24 calculation (about 45% of 7.19, i.e. 3.2) lies inside it. Options `--free-a7` in scripts 03 and 05 (with `--cold`); results named `..._cold_a7...`.
+- Code: `acm.gpp(..., a7=)`, `run(..., a7=)`, `build_forward(..., a7=)`, `build_model(..., free_a7=True)`; tests check numpy against PyTensor, the gradient with respect to `a7`, and the full log posterior against a hand computation.
+- `diagnose_chains.py` shows `a7`; its "log prior" leaves out the `a7` and cold-threshold priors, as before for the thresholds, so it stays comparable with F17 to F24.
+
+**Steps and rules, fixed before running:**
+1. **Prior predictive check** (`03 --cold --free-a7`), same rule as D57: Tier 2 at least 50% and Tier 1 at most 7%, with the soft foliage constraint. If it fails, no fit.
+2. **Quick fit** (`05 --cold --free-a7 --quick`), compared with the free cold fit of F21 (log-likelihood -508.7, peak LAI 1.07, `ceff` 110):
+   - **Supports the hypothesis** if all hold: the chains agree; peak LAI at least 2; `ceff` inside the official CARDAMOM range 5 to 50; `a7` median below 5; log-likelihood not more than 10 below F21.
+   - **Contradicts it** if the canopy stays thin (peak LAI below 1.5) with `a7` near or above 7.
+   - **Not identifiable** if the chains disagree along the `a7`-canopy trade-off, or the `a7` interval is about as wide as its prior: then NEE cannot tell light-use efficiency from canopy size, which is reported as an RQ3 result.
+   - Anything else: reported as unclear.
+3. **A diagnostic, not a model choice.** Even if supported, estimating `a7` is not automatically adopted. Adoption would be a separate decision and would need the full workflow (fake-data check with `a7` sampled, full fit, comparison with the cold model by PSIS-LOO).
+
+### D59. Fake-data check of the cold-limit model (Decided, 2026-10-17)
+**Why.** The cold-limit model (D55) with the main priors passed its prior predictive check (F24). Before its full fit can be trusted computationally it needs its own fake-data check (Gelman et al. 2020, Section 4.1), like the main model (D48, F16).
+
+**What.** Script 04 with `--cold`: the "true" forest is the first fully plausible prior draw of the cold model, including two true thresholds; fake NEE is made with the cold limit; the fitted model has the cold limit. Fake noise is RANDUNC only, so the fit uses the RANDUNC-only observation model, as in D48. Sampler: dense mass matrix with target_accept 0.95 (D53). Results named `fake_data_check_cold`.
+
+**Criteria (fixed before running):** the four D49 criteria. The truth criterion keeps the same allowance of misses as D49 (4): with the two thresholds there are 26 quantities, so at least 22 of 26 must contain the truth (with 90% intervals, a perfect fit misses 5 or more of 26 in about 11% of runs, against about 9% for 5 or more of 24, so the test is almost equally strict).
+
 ## Part 3. Likelihood
 
 ### L1. Observation model: what sigma is (Decided, 2026-10-08; main model changed 2026-10-16)

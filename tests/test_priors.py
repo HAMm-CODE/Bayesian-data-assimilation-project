@@ -128,3 +128,12 @@ def test_chain_start_includes_cold_fractions():
     start = initial_values(raw, 1)
     for name, (low, high, _, _) in COLD_PRIORS.items():
         assert start[f"{name}_fraction"] == pytest.approx((raw[name][1] - low) / (high - low))
+
+
+def test_a7_prior_draws_and_scale():
+    """D58: a7 draws are positive, centred on the fixed DALEC2 value, compared on the log scale."""
+    from dalec.priors import ACM_PRIORS, sample_acm
+    draws = sample_acm(20000, np.random.default_rng(4))["acm_a7"]
+    assert draws.min() > 0
+    assert np.median(draws) == pytest.approx(ACM_PRIORS["acm_a7"][1], rel=0.02)
+    assert float(to_prior_scale("acm_a7", np.e)) == pytest.approx(1.0)

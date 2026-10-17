@@ -76,7 +76,8 @@ def main() -> None:
         raw.update({name: values(name) for name in SHARES})
         cold = ((values("cold_t_shutdown"), values("cold_t_full"))
                 if "cold_t_shutdown" in post.data_vars else None)
-        out = run(params, drivers, latitude_deg=latitude, frost_threshold_degc=frost, cold=cold)
+        a7 = values("acm_a7") if "acm_a7" in post.data_vars else None
+        out = run(params, drivers, latitude_deg=latitude, frost_threshold_degc=frost, cold=cold, a7=a7)
         sd = np.broadcast_to(sigma[use], (pick.size, int(use.sum())))
         if "sigma_m" in post.data_vars:
             sd = np.sqrt(sd**2 + values("sigma_m")[:, None] ** 2)
@@ -112,6 +113,8 @@ def main() -> None:
         if cold is not None:
             row["cold limit: no GPP below (degC)"] = np.median(cold[0])
             row["cold limit: full GPP above (degC)"] = np.median(cold[1])
+        if a7 is not None:
+            row["ACM light-use efficiency a7"] = np.median(a7)
         row.update({name: np.median(raw[name]) if name in raw else np.median(values(name))
                     for name in SHOW})
         rows.append(row)

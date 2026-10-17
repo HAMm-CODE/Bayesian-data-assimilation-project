@@ -83,3 +83,29 @@ def test_cold_limit_matches_numpy_and_has_right_gradient():
         return run(params, DRIVERS, latitude_deg=LAT, cold=(value, cold[1])).nee.sum()
     numeric = (total_nee(cold[0] + h) - total_nee(cold[0] - h)) / (2 * h)
     assert gradient == pytest.approx(numeric, rel=1e-4, abs=1e-8)
+
+
+def test_sampled_a7_matches_numpy_and_has_right_gradient():
+    """D58: a7 given as a value gives the same NEE in numpy and PyTensor; a7 = None
+    keeps the fixed DALEC2 value; d(total NEE)/d(a7) matches a numerical slope."""
+    from dalec.acm import DALEC2_ACM
+    params = median_parameters()
+    fixed = run(params, DRIVERS, latitude_deg=LAT).nee
+    same = run(params, DRIVERS, latitude_deg=LAT, a7=DALEC2_ACM.a7).nee
+    assert np.allclose(same, fixed, rtol=1e-12, atol=1e-12)
+
+    a7 = 3.5
+    reference = run(params, DRIVERS, latitude_deg=LAT, cold=(-5.0, 7.0), a7=a7)
+    graph = build_forward(params.as_arrays(), DRIVERS, latitude_deg=LAT,
+                          cold=(np.float64(-5.0), np.float64(7.0)), a7=np.float64(a7))
+    assert np.allclose(pytensor.function([], graph["nee"])(), reference.nee, rtol=1e-10, atol=1e-10)
+    assert not np.allclose(reference.nee, run(params, DRIVERS, latitude_deg=LAT, cold=(-5.0, 7.0)).nee)
+
+    a = pt.dscalar("a7")
+    total = build_forward(params.as_arrays(), DRIVERS, latitude_deg=LAT, a7=a)["nee"].sum()
+    gradient = pytensor.function([a], pt.grad(total, a))(a7)
+    h = 1e-5
+    def total_nee(value):
+        return run(params, DRIVERS, latitude_deg=LAT, a7=value).nee.sum()
+    numeric = (total_nee(a7 + h) - total_nee(a7 - h)) / (2 * h)
+    assert gradient == pytest.approx(numeric, rel=1e-4, abs=1e-8)

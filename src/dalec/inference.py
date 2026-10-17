@@ -21,7 +21,9 @@ import pytensor.tensor as pt
 
 from dalec.model import build_forward
 from dalec.model_numpy import Drivers
-from dalec.priors import C_LF_RANGE, COLD_PRIORS, DIRICHLET_ALPHA, EDC_EQF, PRIORS, priors_for
+from dalec.priors import (
+    ACM_PRIORS, C_LF_RANGE, COLD_PRIORS, DIRICHLET_ALPHA, EDC_EQF, PRIORS, priors_for,
+)
 
 OBSERVATION_MODELS = ("randunc_only", "randunc_plus_model_error")   # L1: main, sensitivity
 SHARES = tuple(DIRICHLET_ALPHA)   # f_lab, f_fol, f_roo, f_woo
@@ -57,7 +59,8 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
                 model_error_prior_sd: float = 1.0,
                 edc_eqf: float = EDC_EQF,
                 fixed: dict[str, float] | None = None,
-                cold_limit: bool = False) -> pm.Model:
+                cold_limit: bool = False,
+                free_a7: bool = False) -> pm.Model:
     """Build the PyMC model for one block of days.
 
     `observed_nee`, `sigma` (RANDUNC) and `assimilable` (the D12 mask) have one
@@ -72,6 +75,9 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
     `cold_limit` adds the cold limit on photosynthesis (D55, Stettz et al. 2022)
     with its two thresholds sampled from COLD_PRIORS, and uses the cold model's
     prior list (`priors_for(cold=True)`, D57).
+
+    `free_a7` samples the ACM's maximum canopy light-use efficiency (`acm_a7`,
+    prior in ACM_PRIORS) instead of keeping the fixed DALEC2 value (D58 diagnostic).
     """
     priors = priors_for(cold_limit)
     fixed = dict(fixed or {})
@@ -118,8 +124,12 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
                 thresholds.append(pm.Deterministic(
                     name, np.float64(low) + np.float64(high - low) * fraction))
             cold = tuple(thresholds)
+        a7 = None
+        if free_a7:                                      # D58 diagnostic
+            _, median, sdlog = ACM_PRIORS["acm_a7"]
+            a7 = pm.LogNormal("acm_a7", mu=np.log(np.float64(median)), sigma=np.float64(sdlog))
         out = build_forward(theta, drivers, latitude_deg=latitude_deg,
-                            frost_threshold_degc=frost_threshold_degc, cold=cold)
+                            frost_threshold_degc=frost_threshold_degc, cold=cold, a7=a7)
 
         # Soft steady-state constraint on the foliage pool (D44).
         rs = pm.Deterministic("foliage_rs", out["foliage_rs"])
@@ -146,6 +156,9 @@ def initial_values(raw: dict[str, np.ndarray], i: int) -> dict[str, Any]:
     for name, (low, high, _, _) in COLD_PRIORS.items():   # cold model (D55): sampled as fractions
         if name in raw:
             start[f"{name}_fraction"] = (float(raw[name][i]) - low) / (high - low)
+    for name in ACM_PRIORS:                                # D58 diagnostic
+        if name in raw:
+            start[name] = float(raw[name][i])
     return start
 
 

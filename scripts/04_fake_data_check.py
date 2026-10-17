@@ -18,12 +18,14 @@ Run from the repository root:
     python scripts/04_fake_data_check.py --quick   # 2 years, 2 short chains: does it run? (minutes)
     python scripts/04_fake_data_check.py           # the real check (hours)
     python scripts/04_fake_data_check.py --mass-matrix dense   # D52 speed test
+    python scripts/04_fake_data_check.py --cold    # the cold-limit model (D55, D59): truth,
+                                                   # fake NEE and fit all include the cold limit
 
 The quick run judges nothing; it only shows that every step works and prints
 a rough time estimate for the full run.
 
 Saves:
-    results/fake_data_check[_<mass matrix>][_taNN][_quick].nc   all posterior draws (not tracked by git)
+    results/fake_data_check[_cold][_<mass matrix>][_taNN][_quick].nc   all posterior draws (not tracked by git)
     figures/fake_data_recovery[...].csv   one row per quantity: truth, prior, posterior
     (the sampler tags appear only when --mass-matrix or --target-accept is given)
     N  fig_N_fake_data_recovery[...]      prior range, posterior range and truth
@@ -40,7 +42,7 @@ from dalec.data_io import MASK_USE, load_model_block
 from dalec.inference import MASS_MATRIX_INIT, build_model, initial_values, sample
 from dalec.model_numpy import Parameters, drivers_from_frame, run
 from dalec.plotting import apply_style, heading
-from dalec.priors import PRIORS, priors_to_text
+from dalec.priors import COLD_PRIORS, priors_for, priors_to_text
 from dalec.posterior import (
     QUANTITIES, check_can_save, computation_checks, first_days, interval_figure,
     parameter_table, possible_draws, print_table_and_health, sampler_health, search_prior,
@@ -51,14 +53,14 @@ from dalec.posterior import (
 # 1 and 2: the true forest, the fake data and the starting points
 # ---------------------------------------------------------------------------
 
-def choose_truth_and_starts(drivers, years, latitude, frost, n_chains, config):
+def choose_truth_and_starts(drivers, years, latitude, frost, n_chains, config, cold=False):
     """Search prior draws: the first fully plausible one is the truth (D48);
     the next ones that are physically possible are the chain starts (D45)."""
     fake = config["fake_data"]
     params, raw, summary, checks = search_prior(
         drivers, years, latitude, frost, seed=int(fake["seed"]),
         n_candidates=int(fake["n_candidates"]),
-        batch_size=int(config["prior_predictive"]["batch_size"]))
+        batch_size=int(config["prior_predictive"]["batch_size"]), cold=cold)
     plausible = np.flatnonzero(checks["tier2_all"])
     possible = np.flatnonzero(~checks["tier1_fail"])
     if plausible.size == 0:
@@ -72,6 +74,9 @@ def choose_truth_and_starts(drivers, years, latitude, frost, n_chains, config):
           f"GPP {summary['gpp'][truth]:.0f}, Rh {summary['rh'][truth]:.0f}, "
           f"NEE {summary['nee'][truth]:.0f} g C m-2 yr-1, peak LAI {summary['peak_lai'][truth]:.1f}, "
           f"foliage end/start {summary['foliage_ratio'][truth]:.2f}")
+    if cold:
+        print("  true cold limit: no GPP below "
+              f"{raw['cold_t_shutdown'][truth]:.1f} degC, full GPP above {raw['cold_t_full'][truth]:.1f} degC")
     return params, raw, truth, starts
 
 
@@ -88,8 +93,11 @@ def report(table, health, config: dict[str, Any], judged: bool) -> None:
     fake = config["fake_data"]
     heading("D49 criteria, fixed before running")
     checks = computation_checks(table, health, config["diagnostics"])
+    # D49 allows 4 misses among the 24 main quantities (20 of 24); the cold model
+    # adds two thresholds and keeps the same allowance of misses (22 of 26, D59).
+    required = len(table) - (24 - int(fake["min_covered"]))
     checks[f"truth inside the {fake['interval']:.0%} interval for at least "
-           f"{fake['min_covered']} of {len(table)}"] = int(table["truth_inside"].sum()) >= fake["min_covered"]
+           f"{required} of {len(table)}"] = int(table["truth_inside"].sum()) >= required
     for text, ok in checks.items():
         print(f"  {'PASS' if ok else 'FAIL'}  {text}")
     print(f"  truth inside for {int(table['truth_inside'].sum())} of {len(table)}; "
@@ -107,6 +115,8 @@ def main() -> None:
                         help="override sampler.mass_matrix from the config (D52 speed test)")
     parser.add_argument("--target-accept", type=float, default=None,
                         help="override sampler.target_accept (D53); higher = smaller, safer steps")
+    parser.add_argument("--cold", action="store_true",
+                        help="check the cold-limit model (D55, D59)")
     args = parser.parse_args()
 
     check_can_save()
@@ -122,7 +132,7 @@ def main() -> None:
     # command line; the config defaults (D53) carry none.
     ta_tag = "" if args.target_accept is None else f"_ta{round(100 * float(settings['target_accept']))}"
     mm_tag = "" if args.mass_matrix is None else f"_{args.mass_matrix}"
-    suffix = mm_tag + ta_tag + ("_quick" if args.quick else "")
+    suffix = ("_cold" if args.cold else "") + mm_tag + ta_tag + ("_quick" if args.quick else "")
 
     data = load_model_block(config, block="calibration")
     drivers = drivers_from_frame(data, config)
@@ -135,11 +145,13 @@ def main() -> None:
 
     heading("1. The true forest and the chain starts (D48, D45)")
     params, raw, truth, starts = choose_truth_and_starts(
-        drivers, years, latitude, frost, int(settings["chains"]), config)
+        drivers, years, latitude, frost, int(settings["chains"]), config, cold=args.cold)
 
     heading("2. Fake NEE: the true forest plus noise of the real size, on the real assimilable days")
     true_params = Parameters(**{k: v[truth] for k, v in params.as_arrays().items()})
-    true_nee = run(true_params, drivers, latitude_deg=latitude, frost_threshold_degc=frost).nee
+    true_cold = tuple(float(raw[name][truth]) for name in COLD_PRIORS) if args.cold else None
+    true_nee = run(true_params, drivers, latitude_deg=latitude, frost_threshold_degc=frost,
+                   cold=true_cold).nee
     noise = np.random.default_rng(int(fake["seed"]) + 1).standard_normal(drivers.n_days)
     fake_nee = np.where(use, true_nee + np.where(use, sigma, 0.0) * noise, np.nan)
     n_days = drivers.n_days
@@ -154,7 +166,7 @@ def main() -> None:
         print("  note: the fake data have RANDUNC noise only, so the main observation model is used")
     model = build_model(drivers, fake_nee[:n_days], sigma[:n_days], use[:n_days],
                         latitude_deg=latitude, frost_threshold_degc=frost,
-                        observation_model="randunc_only")
+                        observation_model="randunc_only", cold_limit=args.cold)
     print(f"  {settings['chains']} chains x ({settings['tune']} warm-up + {settings['draws']} kept), "
           f"target_accept {settings['target_accept']}, mass matrix {mass_matrix}")
     began = time.perf_counter()
@@ -176,12 +188,13 @@ def main() -> None:
 
     out_dir = resolve_path(config["paths"]["results"])
     out_dir.mkdir(parents=True, exist_ok=True)
-    idata.attrs["priors"] = priors_to_text(PRIORS)   # D57: which priors were used
+    idata.attrs["priors"] = priors_to_text(priors_for(args.cold))   # D57: which priors were used
     idata.to_netcdf(out_dir / f"fake_data_check{suffix}.nc")
     print(f"  saved {out_dir / f'fake_data_check{suffix}.nc'}")
 
     heading("4. Judging the fit (D49)")
-    truth_values = {name: float(raw[name][truth]) for name in QUANTITIES}
+    names = QUANTITIES + (tuple(COLD_PRIORS) if args.cold else ())
+    truth_values = {name: float(raw[name][truth]) for name in names}
     table = parameter_table(idata, float(fake["interval"]), int(fake["seed"]) + 2, truth=truth_values)
     table_path = resolve_path(config["paths"]["figures"]) / f"fake_data_recovery{suffix}.csv"
     table_path.parent.mkdir(parents=True, exist_ok=True)
@@ -189,7 +202,7 @@ def main() -> None:
     print(f"  saved {table_path}")
     report(table, sampler_health(idata), config, judged=not args.quick)
     interval_figure(table, config, f"fig_N_fake_data_recovery{suffix}",
-                    f"Fake-data check: does the fit find the true values? "
+                    f"Fake-data check{' (cold-limit model)' if args.cold else ''}: does the fit find the true values? "
                     f"({float(fake['interval']):.0%} intervals)")
 
 

@@ -23,6 +23,7 @@ Run from the repository root:
 Sensitivity runs (planned runs table, Part 5) use the same script:
     --frost                                   frost switch on (D24)
     --cold                                    cold limit on photosynthesis, thresholds sampled (D55)
+    --free-a7                                 ACM light-use efficiency estimated, a diagnostic (D58)
     --observation-model randunc_plus_model_error   model error added to sigma (L1)
     --mass-matrix dense                       sampler setting only (D52)
 
@@ -72,7 +73,7 @@ def posterior_runs(idata, drivers, latitude, frost, years, n_draws: int, seed: i
                    batch_size: int):
     """Run the numpy model for n posterior draws. Returns daily NEE (draws x days),
     the extra model-error sd per draw (0 in the main model), and the D40 summaries."""
-    params, sigma_m, cold = posterior_parameters(idata, n_draws, seed)
+    params, sigma_m, cold, a7 = posterior_parameters(idata, n_draws, seed)
     arrays = params.as_arrays()
     nee, summaries = [], []
     for start in range(0, sigma_m.size, batch_size):
@@ -80,7 +81,7 @@ def posterior_runs(idata, drivers, latitude, frost, years, n_draws: int, seed: i
         batch = type(params)(**{k: v[start:stop] for k, v in arrays.items()})
         batch_cold = None if cold is None else (cold[0][start:stop], cold[1][start:stop])
         out = run(batch, drivers, latitude_deg=latitude, frost_threshold_degc=frost,
-                  cold=batch_cold)
+                  cold=batch_cold, a7=None if a7 is None else a7[start:stop])
         nee.append(out.nee)
         summary = summarise_batch(out, years)
         summary["ra"] = np.stack([out.ra[:, years == y].sum(axis=1)
@@ -222,6 +223,8 @@ def main() -> None:
     parser.add_argument("--frost", action="store_true", help="frost switch on (D24)")
     parser.add_argument("--cold", action="store_true",
                         help="add the cold limit on photosynthesis, two sampled thresholds (D55)")
+    parser.add_argument("--free-a7", action="store_true",
+                        help="estimate the ACM light-use efficiency a7 instead of fixing it (D58 diagnostic)")
     parser.add_argument("--observation-model", choices=OBSERVATION_MODELS, default=None,
                         help="override likelihood.observation_model from the config (L1)")
     parser.add_argument("--mass-matrix", choices=tuple(MASS_MATRIX_INIT), default=None,
@@ -252,7 +255,8 @@ def main() -> None:
     fixed = {name: prior_median(name, priors_for(args.cold)) for name in filter(None, args.fix.split(","))}
     fix_tag = ("_fix-" + "-".join(sorted(fixed))) if fixed else ""
     label = ("fit" + ("_model_error" if observation_model != "randunc_only" else "") + fix_tag
-             + ("_frost" if frost_on else "") + ("_cold" if args.cold else "") + mm_tag + ta_tag
+             + ("_frost" if frost_on else "") + ("_cold" if args.cold else "")
+             + ("_a7" if args.free_a7 else "") + mm_tag + ta_tag
              + ("_quick" if args.quick else ""))
     interval = float(fit["interval"])
     batch_size = int(config["prior_predictive"]["batch_size"])
@@ -275,18 +279,20 @@ def main() -> None:
           f"mass matrix {mass_matrix}")
     if args.cold:
         print("  cold limit on photosynthesis on (D55): thresholds sampled")
+    if args.free_a7:
+        print("  ACM light-use efficiency a7 sampled, not fixed (D58 diagnostic)")
     if fixed:
         print("  held fixed at their prior medians (D54): "
               + ", ".join(f"{k} = {v:.4g}" for k, v in fixed.items()))
     _, raw, _, checks = search_prior(drivers, years, latitude, frost, seed=int(fit["seed"]),
                                      n_candidates=int(fit["n_candidates"]), batch_size=batch_size,
-                                     cold=args.cold)
+                                     cold=args.cold, free_a7=args.free_a7)
     starts = possible_draws(checks, int(settings["chains"]))
     print(f"  chain starts = prior draws {starts} (each passes Tier 1, D45)")
     model = build_model(drivers, observed, sigma, use, latitude_deg=latitude,
                         frost_threshold_degc=frost, observation_model=observation_model,
                         model_error_prior_sd=float(lik["model_error_prior_sd"]), fixed=fixed,
-                        cold_limit=args.cold)
+                        cold_limit=args.cold, free_a7=args.free_a7)
     print(f"  {settings['chains']} chains x ({settings['tune']} warm-up + {settings['draws']} kept), "
           f"target_accept {settings['target_accept']}")
     began = time.perf_counter()

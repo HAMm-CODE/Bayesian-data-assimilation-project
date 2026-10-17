@@ -206,6 +206,7 @@ class Output:
 def run(params: Parameters, drivers: Drivers, *, latitude_deg: float,
         frost_threshold_degc: float | None = None,
         cold: tuple | None = None,
+        a7=None,
         constants: AcmConstants = DALEC2_ACM) -> Output:
     """Run DALEC2 over every day of `drivers`, for every draw in `params`.
 
@@ -213,6 +214,8 @@ def run(params: Parameters, drivers: Drivers, *, latitude_deg: float,
     which GPP is set to zero (the optional frost switch).
     cold: None (DALEC2 as published) or (t_shutdown, t_full), the thresholds of
     the cold limit on photosynthesis (D55), one value or one per draw.
+    a7: None (the fixed ACM value) or the maximum canopy light-use efficiency,
+    one value or one per draw (D58 diagnostic).
     """
     p = params.as_arrays()
     shape = p["f_auto"].shape
@@ -239,7 +242,7 @@ def run(params: Parameters, drivers: Drivers, *, latitude_deg: float,
         lai = c_fol / p["lma"]
         gpp = acm_gpp(lai=lai, t_max=drivers.t_max[i], t_min=drivers.t_min[i],
                       sw_in=drivers.sw_in[i], co2=drivers.co2[i], doy=drivers.doy[i],
-                      ceff=p["ceff"], latitude_deg=latitude_deg, constants=constants)
+                      ceff=p["ceff"], latitude_deg=latitude_deg, constants=constants, a7=a7)
         gpp = gpp * frost[i]
         if cold is not None:
             gpp = gpp * cold_multiplier(drivers.t_min[i], cold[0], cold[1])

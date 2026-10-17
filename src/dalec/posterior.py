@@ -18,7 +18,8 @@ from dalec.model_numpy import Drivers, Parameters
 from dalec.plausibility import evaluate, run_and_summarise
 from dalec.plotting import BLUE, GREY_LIGHT, INK_SOFT, ORANGE, save_figure
 from dalec.priors import (
-    COLD_PRIORS, priors_for, priors_from_attrs, sample_cold, sample_prior, to_prior_scale,
+    ACM_PRIORS, COLD_PRIORS, priors_for, priors_from_attrs, sample_acm, sample_cold, sample_prior,
+    to_prior_scale,
 )
 
 # The 24 sampled quantities, in the order of the parameter groups (D34 to D39).
@@ -49,13 +50,14 @@ def first_days(drivers: Drivers, n: int) -> Drivers:
 
 
 def search_prior(drivers, years, latitude, frost, *, seed: int, n_candidates: int,
-                 batch_size: int, cold: bool = False):
+                 batch_size: int, cold: bool = False, free_a7: bool = False):
     """Draw prior parameter sets, run each over the block, and apply the D40 checks.
 
     Returns (params, raw, summary, checks). Callers pick from these: physically
     possible draws (Tier 1 passed) as chain starts (D45), and for the fake-data
     check, a fully plausible draw as the truth (D48). With `cold`, the draws come
-    from the cold model's priors and include the two thresholds (D55, D57).
+    from the cold model's priors and include the two thresholds (D55, D57); with
+    `free_a7`, they include the ACM light-use efficiency (D58).
     """
     rng = np.random.default_rng(seed)
     params, raw = sample_prior(n_candidates, rng, priors_for(cold))
@@ -63,8 +65,12 @@ def search_prior(drivers, years, latitude, frost, *, seed: int, n_candidates: in
     if cold:
         raw.update(sample_cold(n_candidates, rng))
         thresholds = tuple(raw[name] for name in COLD_PRIORS)
+    a7 = None
+    if free_a7:
+        raw.update(sample_acm(n_candidates, rng))
+        a7 = raw["acm_a7"]
     summary = run_and_summarise(params, drivers, latitude, frost, years, None,
-                                batch_size, verbose=False, cold=thresholds)
+                                batch_size, verbose=False, cold=thresholds, a7=a7)
     return params, raw, summary, evaluate(summary)
 
 
@@ -107,7 +113,10 @@ def parameter_table(idata, interval: float, seed: int,
     quantities = QUANTITIES
     if cold:
         prior.update(sample_cold(20_000, rng))
-        quantities = QUANTITIES + tuple(COLD_PRIORS)
+        quantities = quantities + tuple(COLD_PRIORS)
+    if "acm_a7" in idata.posterior.data_vars:          # D58 diagnostic
+        prior.update(sample_acm(20_000, rng))
+        quantities = quantities + tuple(ACM_PRIORS)
     diagnostics = az.summary(idata, var_names=[q for q in quantities if
                                                float(np.ptp(np.asarray(idata.posterior[q].values))) > 0])
     rows = []
@@ -216,9 +225,10 @@ def posterior_parameters(idata, n: int, seed: int):
     """n posterior draws, chosen at random across all chains, for running the
     numpy model forward (posterior predictive checks).
 
-    Returns (Parameters, sigma_m, cold): sigma_m is the model error per draw
+    Returns (Parameters, sigma_m, cold, a7): sigma_m is the model error per draw
     (zeros without it); cold is (t_shutdown, t_full) per draw in the cold-limit
-    model (D55), otherwise None.
+    model (D55), otherwise None; a7 is the sampled ACM light-use efficiency per
+    draw (D58 diagnostic), otherwise None.
     """
     post = idata.posterior
     total = int(np.asarray(post["f_auto"].values).size)
@@ -231,4 +241,5 @@ def posterior_parameters(idata, n: int, seed: int):
     sigma_m = draws("sigma_m") if "sigma_m" in post.data_vars else np.zeros(pick.size)
     cold = ((draws("cold_t_shutdown"), draws("cold_t_full"))
             if "cold_t_shutdown" in post.data_vars else None)
-    return Parameters(**values), sigma_m, cold
+    a7 = draws("acm_a7") if "acm_a7" in post.data_vars else None
+    return Parameters(**values), sigma_m, cold, a7

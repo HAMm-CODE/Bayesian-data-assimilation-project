@@ -10,8 +10,9 @@ Figure L for context only. The D40 checks themselves live in
 Run from the repository root:
     python scripts/03_prior_predictive.py          main model (DALEC2)
     python scripts/03_prior_predictive.py --cold   cold-limit model (D55) with its priors (D57)
+    python scripts/03_prior_predictive.py --cold --free-a7   ... with the ACM light-use efficiency sampled (D58)
 
-Makes two figures (names end in _cold for the cold-limit model):
+Makes two figures (names end in _cold, or _cold_a7, for the other model versions):
     L  fig_L_prior_predictive_nee      NEE through the year: prior range vs observed (context)
     M  fig_M_prior_predictive_checks   the D40 quantities, with their plausible bands
 """
@@ -35,8 +36,8 @@ from dalec.plotting import (
     apply_style, climatology, day_of_year_365, heading, save_figure, set_year_axis,
 )
 from dalec.priors import (
-    COLD_MODEL_PRIOR_CHANGES, COLD_PRIORS, PRIORS, edc_log_weight, priors_for, sample_cold,
-    sample_prior, to_prior_scale,
+    ACM_PRIORS, COLD_MODEL_PRIOR_CHANGES, COLD_PRIORS, PRIORS, edc_log_weight, priors_for,
+    sample_acm, sample_cold, sample_prior, to_prior_scale,
 )
 
 # ---------------------------------------------------------------------------
@@ -163,7 +164,7 @@ def figure_l(m: dict[str, np.ndarray], observed: pd.DataFrame, config: dict[str,
     ax.axhline(0, color=INK_SOFT, lw=0.8)
     set_year_axis(ax)
     start, end = year_block(config, "calibration")
-    model = " (cold-limit model)" if suffix == "_cold" else ""
+    model = {"_cold": " (cold-limit model)", "_cold_a7": " (cold-limit model, a7 sampled)"}.get(suffix, "")
     ax.set_title(f"NEE through the year implied by the priors{model}, {start}-{end}")
     ax.set_ylabel(f"NEE ({UNIT_FLUX})\nnegative = forest takes up carbon")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncols=2)
@@ -189,7 +190,7 @@ def figure_m(m: dict[str, np.ndarray], config: dict[str, Any], suffix: str = "")
     ax.axis("off")
     ax.text(0, 0.6, "grey band = plausible range (D40)\nbars = draws that are\nphysically possible",
             fontsize=9, va="center")
-    model = ", cold-limit model" if suffix == "_cold" else ""
+    model = {"_cold": ", cold-limit model", "_cold_a7": ", cold-limit model, a7 sampled"}.get(suffix, "")
     fig.suptitle(f"What the priors imply about the forest (prior predictive, D40{model})", fontsize=10)
     fig.tight_layout()
     save_figure(fig, f"fig_M_prior_predictive_checks{suffix}", config)
@@ -201,7 +202,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--cold", action="store_true",
                         help="cold-limit model (D55) with its own priors (D57)")
+    parser.add_argument("--free-a7", action="store_true",
+                        help="with --cold: sample the ACM light-use efficiency a7 (D58 diagnostic)")
     args = parser.parse_args()
+    if args.free_a7 and not args.cold:
+        parser.error("--free-a7 is a diagnostic of the cold-limit model; use it with --cold")
 
     config = load_config()
     apply_style()
@@ -218,7 +223,8 @@ def main() -> None:
 
     rng = np.random.default_rng(int(settings["seed"]))
     if args.cold:
-        cold_model(drivers, years, weights, latitude, batch_size, observed, settings, config, rng)
+        cold_model(drivers, years, weights, latitude, batch_size, observed, settings, config, rng,
+                   free_a7=args.free_a7)
         return
     params, raw = sample_prior(int(settings["n_draws"]), rng)
 
@@ -257,52 +263,73 @@ def main() -> None:
 COLD_MODEL_TIER1_LIMIT = 0.07
 
 
-def cold_model(drivers, years, weights, latitude, batch_size, observed, settings, config, rng) -> None:
-    """Prior predictive check of the cold-limit model (D55) with its priors (D57).
+def cold_model(drivers, years, weights, latitude, batch_size, observed, settings, config, rng,
+               free_a7: bool = False) -> None:
+    """Prior predictive check of the cold-limit model (D55), with its priors (D57)
+    and, with `free_a7`, the ACM light-use efficiency sampled (D58).
 
-    The same draws are also run with the `ceff` prior of the main model (D42), by
-    moving each `ceff` draw to the same position within the D42 prior, so the two
-    differ only in `ceff`.
+    A paired comparison runs the same draws once more with one thing changed back:
+    a7 fixed at the DALEC2 value (with `free_a7`), or else `ceff` moved to the same
+    position within the main model's prior (only if the cold model changes `ceff`, D57).
     """
     n = int(settings["n_draws"])
     priors = priors_for(cold=True)
     params, raw = sample_prior(n, rng, priors)
     raw.update(sample_cold(n, rng))
     thresholds = tuple(raw[name] for name in COLD_PRIORS)
-    changed = ", ".join(f"{k} {v}" for k, v in COLD_MODEL_PRIOR_CHANGES.items())
+    a7 = None
+    if free_a7:
+        raw.update(sample_acm(n, rng))
+        a7 = raw["acm_a7"]
+    suffix = "_cold" + ("_a7" if free_a7 else "")
+    decision = "D58" if free_a7 else "D57"
+    changes = [f"{k} {v}" for k, v in COLD_MODEL_PRIOR_CHANGES.items()]
+    if free_a7:
+        changes.append(f"acm_a7 sampled {ACM_PRIORS['acm_a7']}")
+    changed = "; ".join(changes) if changes else "none"
 
     heading(f"Running {n} prior draws over {drivers.n_days} days "
-            f"(cold-limit model, D55; priors changed for it, D57: {changed})")
+            f"(cold-limit model, D55; prior changes: {changed})")
     cold_run = run_and_summarise(params, drivers, latitude, None, years, weights, batch_size,
-                                 cold=thresholds)
+                                 cold=thresholds, a7=a7)
     cold_result = evaluate(cold_run)
-    report(cold_result, "Prior predictive check, cold-limit model (D40, D57)")
+    report(cold_result, f"Prior predictive check, cold-limit model (D40, {decision})")
     tier1_links = drivers_of_failure(raw, cold_result["tier1_fail"], "Tier 1 failure")
     tier2_links = drivers_of_failure(raw, ~cold_result["tier2_all"], "Tier 2 failure")
-    parameter_table(raw, tier1_links, tier2_links, config, suffix="_cold")
+    parameter_table(raw, tier1_links, tier2_links, config, suffix=suffix)
     t1, t2 = weighted_report(cold_result, edc_weights(cold_run),
-                             "With the soft foliage constraint (D44), cold-limit model, by re-weighting")
+                             "With the soft foliage constraint (D44), by re-weighting")
 
-    # Same draws, ceff moved to the same position within the main model's prior (D42).
-    _, median_new, sd_new = priors["ceff"]
-    _, median_old, sd_old = PRIORS["ceff"]
-    z = np.log(raw["ceff"] / median_new) / sd_new
-    arrays = params.as_arrays()
-    arrays["ceff"] = median_old * np.exp(sd_old * z)
-    old_run = run_and_summarise(type(params)(**arrays), drivers, latitude, None, years, weights,
-                                batch_size, verbose=False, cold=thresholds)
-    old_result = evaluate(old_run)
-    report(old_result, "For comparison: same draws, ceff prior of the main model (D42)")
-    t1_old, t2_old = weighted_report(old_result, edc_weights(old_run),
-                                     "For comparison, with the soft foliage constraint (D44)")
+    comparison = None
+    if free_a7:
+        comparison = ("same draws, a7 fixed at the DALEC2 value", params)
+        compare_a7 = None
+    elif "ceff" in COLD_MODEL_PRIOR_CHANGES:
+        _, median_new, sd_new = priors["ceff"]
+        _, median_old, sd_old = PRIORS["ceff"]
+        z = np.log(raw["ceff"] / median_new) / sd_new
+        arrays = params.as_arrays()
+        arrays["ceff"] = median_old * np.exp(sd_old * z)
+        comparison = ("same draws, ceff prior of the main model (D42)", type(params)(**arrays))
+        compare_a7 = a7
+    if comparison is not None:
+        label, compare_params = comparison
+        old_run = run_and_summarise(compare_params, drivers, latitude, None, years, weights,
+                                    batch_size, verbose=False, cold=thresholds, a7=compare_a7)
+        old_result = evaluate(old_run)
+        report(old_result, f"For comparison: {label}")
+        t1_old, t2_old = weighted_report(old_result, edc_weights(old_run),
+                                         "For comparison, with the soft foliage constraint (D44)")
+        heading(f"Medians of the plausible draws (comparison in brackets: {label})")
+        ok, ok_old = ~cold_result["tier1_fail"], ~old_result["tier1_fail"]
+        for name in TIER2_BANDS:
+            print(f"  {name:14s} median {np.median(cold_run[name][ok]):9.2f}"
+                  f"   ({np.median(old_run[name][ok_old]):9.2f})")
+    if free_a7:
+        ok = ~cold_result["tier1_fail"]
+        print(f"  {'acm_a7':14s} median {np.median(a7[ok]):9.2f}   (fixed {ACM_PRIORS['acm_a7'][1]:.2f})")
 
-    heading("Medians of the plausible draws (cold-limit model; D42 ceff in brackets)")
-    ok, ok_old = ~cold_result["tier1_fail"], ~old_result["tier1_fail"]
-    for name in TIER2_BANDS:
-        print(f"  {name:14s} median {np.median(cold_run[name][ok]):9.2f}"
-              f"   ({np.median(old_run[name][ok_old]):9.2f})")
-
-    heading("D57 rule, fixed before running (with the soft foliage constraint, as fitted)")
+    heading(f"{decision} rule, fixed before running (with the soft foliage constraint, as fitted)")
     rule = {
         f"Tier 2 at least {TIER2_TARGET:.0%}": t2 >= TIER2_TARGET,
         f"Tier 1 at most {COLD_MODEL_TIER1_LIMIT:.0%} (main model accepted at 6.4%, F15)":
@@ -310,13 +337,21 @@ def cold_model(drivers, years, weights, latitude, batch_size, observed, settings
     }
     for text, ok_rule in rule.items():
         print(f"  {'PASS' if ok_rule else 'FAIL'}  {text}")
-    print(f"  (cold model: Tier 1 {t1:.1%}, Tier 2 {t2:.1%}; "
-          f"with the D42 ceff prior: Tier 1 {t1_old:.1%}, Tier 2 {t2_old:.1%})")
+    line = f"  (this model: Tier 1 {t1:.1%}, Tier 2 {t2:.1%}"
+    if comparison is not None:
+        line += f"; {comparison[0]}: Tier 1 {t1_old:.1%}, Tier 2 {t2_old:.1%}"
+    print(line + ")")
     verdict = all(rule.values())
-    print(f"\n  -> {'use these priors for the cold-limit model' if verdict else 'keep the D42 ceff prior for the cold-limit model (D57 option B)'}")
+    if free_a7:
+        outcome = ("the priors are sound: go on to the quick fit (D58)" if verdict else
+                   "the a7 prior gives implausible forests: do not fit; revisit the a7 prior (D58)")
+    else:
+        outcome = ("use these priors for the cold-limit model" if verdict else
+                   "keep the D42 ceff prior for the cold-limit model (D57 option B)")
+    print(f"\n  -> {outcome}")
 
-    figure_l(cold_run, observed, config, suffix="_cold")
-    figure_m(cold_run, config, suffix="_cold")
+    figure_l(cold_run, observed, config, suffix=suffix)
+    figure_m(cold_run, config, suffix=suffix)
 
 
 if __name__ == "__main__":

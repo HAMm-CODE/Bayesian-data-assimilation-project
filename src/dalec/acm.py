@@ -59,7 +59,7 @@ def day_length_hours(doy, latitude_deg):
     return 24.0 * np.arccos(np.clip(-mult, -1.0, 1.0)) / np.pi
 
 
-def gpp(*, lai, t_max, t_min, sw_in, co2, doy, ceff, latitude_deg, constants=DALEC2_ACM):
+def gpp(*, lai, t_max, t_min, sw_in, co2, doy, ceff, latitude_deg, constants=DALEC2_ACM, a7=None):
     """Daily GPP in g C m-2 d-1, following `ACM.c` step by step.
 
     Parameters (all may be arrays that broadcast together)
@@ -72,6 +72,8 @@ def gpp(*, lai, t_max, t_min, sw_in, co2, doy, ceff, latitude_deg, constants=DAL
     doy     : day of year, 1 to 366 (for day length only)
     ceff    : canopy efficiency (a fitted parameter)
     latitude_deg : site latitude in degrees north
+    a7      : optional value (or one per draw) replacing the fixed maximum canopy
+              light-use efficiency `constants.a7` (D58 diagnostic); None keeps it
     """
     c = constants
     lai = np.asarray(lai, dtype=float)
@@ -96,7 +98,8 @@ def gpp(*, lai, t_max, t_min, sw_in, co2, doy, ceff, latitude_deg, constants=DAL
     p_d = g_c * (co2 - c_i)
 
     # (B4) Canopy light-use efficiency: rises with LAI, then levels off.
-    e_0 = c.a7 * lai**2 / (lai**2 + c.a9)
+    a7 = c.a7 if a7 is None else np.asarray(a7, dtype=float)
+    e_0 = a7 * lai**2 / (lai**2 + c.a9)
 
     # Light-limited and CO2-limited rates combined (whichever is smaller
     # dominates). With no leaves both are zero; the result is then zero, not 0/0.
