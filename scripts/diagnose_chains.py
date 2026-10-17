@@ -30,7 +30,9 @@ from dalec.inference import SHARES
 from dalec.model_numpy import Parameters, drivers_from_frame, run
 from dalec.plausibility import evaluate, summarise_batch
 from dalec.plotting import heading
-from dalec.priors import PRIORS, edc_log_weight, log_prior, sample_prior, steady_state_ratio
+from dalec.priors import (
+    PRIORS, edc_log_weight, log_prior, priors_from_attrs, sample_prior, steady_state_ratio,
+)
 
 SHOW = ("ceff", "lma", "c_lf", "f_auto", "f_fol", "temperature_exponent", "c_fol_0", "c_som_0")
 
@@ -58,6 +60,7 @@ def main() -> None:
 
     idata = az.from_netcdf(resolve_path(config["paths"]["results"]) / f"{label}.nc")
     post = idata.posterior
+    priors = priors_from_attrs(idata.attrs)   # the priors this fit was made with (D57)
     n_chains, n_draws = np.asarray(post["f_auto"].values).shape
     pick = np.linspace(0, n_draws - 1, min(args.draws_per_chain, n_draws)).astype(int)
     sampler_lp = np.asarray(idata.sample_stats["lp"].values)
@@ -81,7 +84,7 @@ def main() -> None:
         rs = steady_state_ratio(out.pools_in["c_fol"], out.pools_out["c_fol"],
                                 out.pools_yearly["c_fol"].mean(axis=-1), out.pools_start["c_fol"])
         soft = edc_log_weight(rs)
-        prior = log_prior(raw)
+        prior = log_prior(raw, priors)
         summary = summarise_batch(out, years)
         checks = evaluate(summary)
         tier1 = checks["tier1_fail"]
@@ -117,8 +120,8 @@ def main() -> None:
         print(table.T.to_string(float_format=lambda v: f"{v:.4g}"))
 
     # How believable is "believable"? The log prior of draws from the prior itself.
-    _, prior_draws = sample_prior(20_000, np.random.default_rng(1))
-    reference = log_prior(prior_draws)
+    _, prior_draws = sample_prior(20_000, np.random.default_rng(1), priors)
+    reference = log_prior(prior_draws, priors)
     floor = float(np.percentile(reference, 0.1))
     heading("Reading it")
     print(f"  log prior of draws from the prior itself: median {np.median(reference):.1f}; "

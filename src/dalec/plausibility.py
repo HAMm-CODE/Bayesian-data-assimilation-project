@@ -67,8 +67,9 @@ def summarise_batch(out, years: np.ndarray, weights: np.ndarray | None = None) -
 
 def run_and_summarise(params, drivers, latitude: float, frost: float | None, years: np.ndarray,
                       weights: np.ndarray | None, batch_size: int,
-                      verbose: bool = True) -> dict[str, np.ndarray]:
-    """Run every draw of `params` in batches and stack the per-draw summaries."""
+                      verbose: bool = True, cold=None) -> dict[str, np.ndarray]:
+    """Run every draw of `params` in batches and stack the per-draw summaries.
+    `cold` = (t_shutdown, t_full), one value per draw, switches on the cold limit (D55)."""
     p = params.as_arrays()
     n = p["f_auto"].shape[0]
     parts = []
@@ -76,7 +77,9 @@ def run_and_summarise(params, drivers, latitude: float, frost: float | None, yea
         stop = min(start + batch_size, n)
         batch = type(params)(**{k: v[start:stop] for k, v in p.items()})
         with np.errstate(all="ignore"):   # impossible draws may overflow; they are counted
-            out = run(batch, drivers, latitude_deg=latitude, frost_threshold_degc=frost)
+            batch_cold = None if cold is None else (cold[0][start:stop], cold[1][start:stop])
+            out = run(batch, drivers, latitude_deg=latitude, frost_threshold_degc=frost,
+                      cold=batch_cold)
             parts.append(summarise_batch(out, years, weights))
         if verbose:
             print(f"  draws {start + 1}-{stop} of {n} done")

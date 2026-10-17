@@ -17,7 +17,9 @@ from dalec.inference import SHARES
 from dalec.model_numpy import Drivers, Parameters
 from dalec.plausibility import evaluate, run_and_summarise
 from dalec.plotting import BLUE, GREY_LIGHT, INK_SOFT, ORANGE, save_figure
-from dalec.priors import sample_prior, to_prior_scale
+from dalec.priors import (
+    COLD_PRIORS, priors_for, priors_from_attrs, sample_cold, sample_prior, to_prior_scale,
+)
 
 # The 24 sampled quantities, in the order of the parameter groups (D34 to D39).
 QUANTITIES = ("f_auto", *SHARES, "theta_roo", "theta_woo", "theta_lit", "theta_som", "h",
@@ -47,16 +49,22 @@ def first_days(drivers: Drivers, n: int) -> Drivers:
 
 
 def search_prior(drivers, years, latitude, frost, *, seed: int, n_candidates: int,
-                 batch_size: int):
+                 batch_size: int, cold: bool = False):
     """Draw prior parameter sets, run each over the block, and apply the D40 checks.
 
     Returns (params, raw, summary, checks). Callers pick from these: physically
     possible draws (Tier 1 passed) as chain starts (D45), and for the fake-data
-    check, a fully plausible draw as the truth (D48).
+    check, a fully plausible draw as the truth (D48). With `cold`, the draws come
+    from the cold model's priors and include the two thresholds (D55, D57).
     """
-    params, raw = sample_prior(n_candidates, np.random.default_rng(seed))
+    rng = np.random.default_rng(seed)
+    params, raw = sample_prior(n_candidates, rng, priors_for(cold))
+    thresholds = None
+    if cold:
+        raw.update(sample_cold(n_candidates, rng))
+        thresholds = tuple(raw[name] for name in COLD_PRIORS)
     summary = run_and_summarise(params, drivers, latitude, frost, years, None,
-                                batch_size, verbose=False)
+                                batch_size, verbose=False, cold=thresholds)
     return params, raw, summary, evaluate(summary)
 
 
@@ -93,11 +101,17 @@ def parameter_table(idata, interval: float, seed: int,
     the convergence numbers. With `truth` (fake data), also whether the true
     value lies inside the posterior interval."""
     lo, hi = 50 * (1 - interval), 50 * (1 + interval)
-    _, prior = sample_prior(20_000, np.random.default_rng(seed))
-    diagnostics = az.summary(idata, var_names=[q for q in QUANTITIES if
+    cold = "cold_t_shutdown" in idata.posterior.data_vars
+    rng = np.random.default_rng(seed)
+    _, prior = sample_prior(20_000, rng, priors_from_attrs(idata.attrs))   # the fit's own priors
+    quantities = QUANTITIES
+    if cold:
+        prior.update(sample_cold(20_000, rng))
+        quantities = QUANTITIES + tuple(COLD_PRIORS)
+    diagnostics = az.summary(idata, var_names=[q for q in quantities if
                                                float(np.ptp(np.asarray(idata.posterior[q].values))) > 0])
     rows = []
-    for name in QUANTITIES:
+    for name in quantities:
         post = np.asarray(idata.posterior[name].values, dtype=float).reshape(-1)
         p_lo, p_mid, p_hi = np.percentile(prior[name], [lo, 50, hi])
         q_lo, q_mid, q_hi = np.percentile(post, [lo, 50, hi])

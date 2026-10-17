@@ -9,15 +9,15 @@ from dalec.inference import SHARES, build_model, initial_values
 from dalec.model_numpy import run
 from dalec.priors import (
     C_LF_RANGE, COLD_PRIORS, DIRICHLET_ALPHA, PRIORS, edc_log_weight, log_prior, sample_prior,
-    steady_state_ratio,
+    priors_for, steady_state_ratio,
 )
 from test_model_numpy import LAT, median_parameters, synthetic_drivers
 
 DRIVERS = synthetic_drivers(2)
 
 
-def prior_logp(name, value):
-    kind, a, b = PRIORS[name]
+def prior_logp(name, value, priors=PRIORS):
+    kind, a, b = priors[name]
     if kind == "lognormal":
         return stats.lognorm(s=b, scale=a).logpdf(value)
     if kind == "normal":
@@ -40,7 +40,8 @@ def fake_observations(params, seed=1):
 
 def hand_logp(params, h, sigma_m, observed, sigma, use, observation_model, cold=None):
     """Priors + D44 term + likelihood, computed with scipy and the numpy model.
-    `cold` = (t_shutdown, gap) adds the D55 cold limit and its two priors."""
+    `cold` = (t_shutdown, t_full) adds the D55 cold limit, its two priors, and the
+    cold model's prior list (D57)."""
     values = {name: float(getattr(params, name)) for name in PRIORS if name != "h"}
     values["h"] = h
     growth = 1.0 - values["f_auto"]
@@ -50,7 +51,8 @@ def hand_logp(params, h, sigma_m, observed, sigma, use, observation_model, cold=
     reference = run(type(params)(**{**params.as_arrays(), "theta_min": theta_min}),
                     DRIVERS, latitude_deg=LAT, cold=cold)
 
-    total = sum(prior_logp(name, value) for name, value in values.items())
+    priors = priors_for(cold is not None)    # the cold model has its own ceff prior (D57)
+    total = sum(prior_logp(name, value, priors) for name, value in values.items())
     if cold is not None:
         # The model samples each threshold as a Beta(2, 2) fraction of its range.
         for value, (low, high, a, b) in zip(cold, COLD_PRIORS.values()):

@@ -21,7 +21,7 @@ import pytensor.tensor as pt
 
 from dalec.model import build_forward
 from dalec.model_numpy import Drivers
-from dalec.priors import C_LF_RANGE, COLD_PRIORS, DIRICHLET_ALPHA, EDC_EQF, PRIORS
+from dalec.priors import C_LF_RANGE, COLD_PRIORS, DIRICHLET_ALPHA, EDC_EQF, PRIORS, priors_for
 
 OBSERVATION_MODELS = ("randunc_only", "randunc_plus_model_error")   # L1: main, sensitivity
 SHARES = tuple(DIRICHLET_ALPHA)   # f_lab, f_fol, f_roo, f_woo
@@ -70,10 +70,12 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
     exactly like sampled ones.
 
     `cold_limit` adds the cold limit on photosynthesis (D55, Stettz et al. 2022)
-    with its two thresholds sampled from COLD_PRIORS.
+    with its two thresholds sampled from COLD_PRIORS, and uses the cold model's
+    prior list (`priors_for(cold=True)`, D57).
     """
+    priors = priors_for(cold_limit)
     fixed = dict(fixed or {})
-    unknown = set(fixed) - set(PRIORS)
+    unknown = set(fixed) - set(priors)
     if unknown:
         raise ValueError(f"only parameters with a prior can be fixed; unknown: {sorted(unknown)}")
     n = drivers.n_days
@@ -94,10 +96,10 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
                          f"got {observation_model!r}")
 
     with pm.Model() as model:
-        # Priors (D34 to D43), read from the single list in priors.py.
+        # Priors (D34 to D43, and D57 for the cold model), from priors.py.
         rv = {name: (pm.Deterministic(name, pt.as_tensor_variable(np.float64(fixed[name])))
                      if name in fixed else _prior_variable(name, spec))
-              for name, spec in PRIORS.items()}
+              for name, spec in priors.items()}
         shares = pm.Dirichlet("shares", a=np.array(list(DIRICHLET_ALPHA.values())))
 
         # Parameters the model needs that follow from the sampled ones.
@@ -141,6 +143,9 @@ def initial_values(raw: dict[str, np.ndarray], i: int) -> dict[str, Any]:
     start = {name: float(raw[name][i]) for name in PRIORS}
     growth = 1.0 - start["f_auto"]
     start["shares"] = np.array([raw[name][i] / growth for name in SHARES])
+    for name, (low, high, _, _) in COLD_PRIORS.items():   # cold model (D55): sampled as fractions
+        if name in raw:
+            start[f"{name}_fraction"] = (float(raw[name][i]) - low) / (high - low)
     return start
 
 

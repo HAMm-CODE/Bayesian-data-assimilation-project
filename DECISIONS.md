@@ -398,6 +398,7 @@ Following F12 and D40 ("change only the priors linked to failure, with a stated 
 - **Replaces** D38's `LogNormal(16.5, 0.41)` (95% 7.4 to 37), which was built from `p11 x N` with an assumed needle N of 1 to 5 g N m-2.
 - **Honest tension:** a typical Scots pine needle N per area (about 1.2% N of dry mass on roughly 370 g dry mass m-2) would point to N near 4 and `ceff` near 30, i.e. higher, not lower. The prior predictive check says that, with DALEC2's fixed ACM coefficients (fitted at a temperate site, D22) and no cold limit (F9), such values make GPP implausibly high at Hyytiala. So `ceff` here acts as a site-level efficiency that also absorbs ACM's mismatch at a boreal site; it cannot be read as a physiological nitrogen value. This link between `ceff` and the fixed ACM coefficients is an identifiability point for RQ3.
 - **Gelman et al. (2020, Section 2.4)** allow priors to be revised after a prior predictive check, because no observations enter it; the revision must rest on outside knowledge (here a published prior), and both rounds are reported.
+- **Cold-limit model:** see D57, which returns `ceff` to D38 in that model only, because the reason given here (no cold limit) does not apply to it.
 - **Options not taken:** (B) setting `ceff` so that the implied annual GPP matches the site's plausible range (prior elicitation on an observable, also Section 2.4; rejected for now because the site GPP comes partly from the same tower); (C) keeping D38 and accepting the failure.
 
 ### D43. Prior predictive round 3: `c_lf` prior narrowed to its source (Decided, 2026-10-13, after the re-run, F14)
@@ -504,11 +505,12 @@ Following F12 and D40 ("change only the priors linked to failure, with a stated 
 
 **Adopt dense for later runs only if all three hold** (fixed before running): (1) it passes all four D49 criteria; (2) it takes at least 30% less time than 29.4 h, i.e. at most about 20.5 h; (3) for every quantity, its posterior median differs from the diagonal run's by less than 10% of the diagonal run's 90% interval width. Otherwise the diagonal setting stays. The main real-data fit (D51) uses the validated diagonal setting either way.
 
-### D53. Second speed test: dense mass matrix with target_accept 0.95 (Decided, 2026-10-16)
+### D53. Second speed test: dense mass matrix with target_accept 0.95 (Decided, 2026-10-16; adopted for full runs after F23)
 **Why.** F19: dense was 6 times faster and gave the same posterior, but had 13 divergences. A divergence marks a place where the step was too large for the curvature; raising `target_accept` from 0.9 to 0.95 makes the sampler choose smaller steps, which usually removes them at a modest cost in speed.
 **Test.** The same fake-data check (D48) with `--mass-matrix dense --target-accept 0.95`.
 **Adopt dense with target_accept 0.95 for later runs only if all three D52 criteria hold** (all four D49 criteria including no divergences; at most about 20.5 h; every posterior median within 10% of the diagonal run's 90% interval width). Otherwise the diagonal setting stays. Fixed before running.
 **Code:** scripts 04 and 05 accept `--target-accept`; the value is added to the output names (e.g. `_dense_ta95`).
+**Outcome (F23): all three criteria hold, so full runs now use a dense mass matrix with target_accept 0.95** (`config/default.yaml`). Quick runs keep diagonal with 0.9: 150 warm-up draws are too few to learn a dense mass matrix (25 x 25 numbers), and the quick runs F17 to F22 stay comparable. Since this change, output names carry a sampler tag (`_dense`, `_diagonal`, `_taNN`) only when the setting is given on the command line; results made before carry the older names.
 
 ### D54. A simpler model: holding the canopy parameters fixed (Decided as a test, 2026-10-16)
 **Why.** With model error (L1), the chains agree, but the fit still builds GPP from an implausible canopy: thin, partly deciduous, very efficient leaves (F18). Gelman et al. (2020, Section 5.2) suggest simplifying a poorly behaving model, "stripping it down until you get something that works". The aim is to take away the canopy's freedom to imitate a winter shutdown, so the remaining misfit shows up openly (in the predictive checks and in sigma_m) instead of hiding in the parameters.
@@ -566,6 +568,23 @@ with both thresholds calibrated. Here Tmin is the daily minimum (the model is da
 - Drop over about 30: reading (b). The data prefer the thin canopy; the next suspects are the canopy part of the model (the ACM response to LAI and ceff), or adding LAI observations as a second data stream.
 - In between: no clear answer from quick fits; decided on full fits with a proper comparison (PSIS-LOO, Vehtari et al. 2017).
 (For scale: S2 without the cold limit lost about 110 against S1, F20.) This is a diagnostic comparison of quick fits, not a formal model choice.
+
+### D57. Priors of the cold-limit model: `ceff` returns to its first prior, D38 (Decided as a test, 2026-10-16)
+**Why.** F22: with `ceff` near 10, ACM photosynthesis hardly rises with sunlight, and the fit escapes to an implausible canopy. D42 had lowered `ceff` from D38's median 16.5 (95% 7.4 to 37, built from p11 x needle N before any data were seen) to median 10 (95% 5 to 20). Its only stated reason: with no cold limit, higher values make annual GPP implausibly high, because the canopy photosynthesises through the winter. The cold-limit model removes that reason, so the narrowing has to be checked again for that model.
+
+**What.** In the cold-limit model only, `ceff ~ LogNormal(median 16.5, sdlog 0.41)` (D38). Everything else as before. The main model keeps D42.
+- Code: `COLD_MODEL_PRIOR_CHANGES` and `priors_for(cold)` in `priors.py`; `build_model(..., cold_limit=True)` uses them. Each fit now saves its prior list with the results (`priors` note in the .nc file), so the parameter table and `diagnose_chains.py` always use the priors the fit was made with. Fits saved earlier carry no note; they all used the main priors.
+
+**Check before any fit (prior predictive, script 03 `--cold`, no tower NEE used).** Same 1,000-draw design and D40 checks as F13 to F15, with the soft foliage constraint (D44) as fitted. **Rule, fixed before running:** use the D38 `ceff` prior in the cold model if Tier 2 is at least 50% and Tier 1 at most 7% (the main model was accepted at 6.4%, F15; with about 800 effective draws the Monte Carlo error of such a rate is about 0.9 percentage points). Otherwise keep D42 for the cold model too (option B of F22). The script also runs the same draws with the D42 `ceff` prior, for comparison.
+
+**Then:** a quick fit of the cold model (`--cold`), judged like F21 and F22. If it is believable, the cold model goes through the fake-data check and the full fit (D55).
+
+**Gelman et al. (2020) on this step:**
+- Section 2.4: prior predictive checks "provide a way to refine the model without using the data multiple times". That is why the decision rests on the prior predictive check and on the D38 and D42 sources, not on the fit.
+- Section 7.3: "Priors must be specified for each model within a workflow." The cold-limit model is a new model, so its priors are set and checked on their own.
+- Section 7.3 also notes that "often as the model becomes more complex, all of the priors need to become tighter." Here one prior is loosened. The reason is specific: the tight `ceff` prior did the job of the missing cold limit, and the cold limit now does that job itself.
+- Section 6.3: sensitivity analysis by "refitting the model with multiple priors". The cold fit with the D42 prior (F21) is kept and reported as that comparison.
+- **Stated openly:** this change was considered after seeing that the fit prefers high `ceff` (F21, F22). It is not a free choice of the best-fitting prior: it returns to a prior written down before any data were seen, for a reason recorded in D42 at the time, and it must pass a check that uses no tower data.
 
 ## Part 3. Likelihood
 
@@ -772,7 +791,40 @@ Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily m
 - **What the cold limit fixed:** the fit is better (sigma_m 14% smaller), the canopy no longer shrinks much in winter, foliage allocation is at its prior (it was starved in S1 and S4), and the log prior improves by about 21.
 - **What it did not fix:** the canopy is still thin, with very efficient and heavy leaves. Still not a believable forest (Tier 2: 0%; log prior far below the 1-in-1,000 prior floor of -37).
 - **Correction to F18:** F18 read the whole implausible canopy as imitating the missing winter shutdown. That explains the winter shrinking, but not the thin, efficient canopy, which stays with the cold limit in place. The cause of the thin canopy is open; D56 tests it.
-- Also seen: Q10 about 2.3 (`temperature_exponent` 0.084, prior median 0.034, i.e. Q10 1.4); `c_lf` about 0.35 (needles about 2.9 years, prior 3 to 5). Seasonal coverage: to be added from the job log.
+- Also seen: Q10 about 2.3 (`temperature_exponent` 0.084, prior median 0.034, i.e. Q10 1.4); `c_lf` about 0.35 (needles about 2.9 years, prior 3 to 5).
+- **Seasonal misfit (average observed minus model, g C m-2 d-1; F20 values without the cold limit in brackets):** winter DJF -0.12 (-0.19 to -0.29), spring MAM -0.04 (+0.17 to +0.29), summer JJA +0.06, autumn SON -0.01. **The spring misfit is gone; the winter misfit is smaller but still there.** This matches what D51 expected from a missing cold limit.
+- **Coverage of the 90% predictive interval:** all 89.9%, DJF 98.5%, MAM 90.3%, JJA 80.7%, SON 91.6%. The interval is too wide in winter and too narrow in summer. One shared model error (sigma_m) cannot be right in both seasons: the model's misfit is larger in summer, when fluxes are large. A model error that grows with the size of the flux is a candidate for later (random flux errors grow with flux size; Richardson et al. 2006), tried only after D56, one change at a time.
+
+**F22. Result of D56: the data strongly prefer the thin canopy (real NEE 1997-1998, model error and cold limit on; Roihu jobs 2354407 and 2354408, 2026-10-16).**
+
+| Quick run | Log-likelihood | Drop against free cold fit | sigma_m | Peak LAI | Annual GPP | `ceff` | `lma` | Tier 1 impossible |
+|---|---|---|---|---|---|---|---|---|
+| Free (F21) | -508.7 | | 0.51 | 1.07 | 1,090 | 110 | 435 | 0% |
+| `ceff` held at 10 | -650.7 | 142 | 0.66 | 14.0 | 2,095 | 10 | 87 | 96% |
+| `lma`, `c_lf`, `ceff` held | -659.1 | 150 | 0.67 | 11.2 | 1,918 | 10 | 185 | 48% |
+
+(Means of the two chains; the chains agree within 2 units in both runs.)
+- **Verdict under the D56 rule: reading (b).** Both drops are far over 30. NEE does not merely allow the thin, efficient canopy; it clearly prefers it.
+- **With ordinary leaves (`ceff` 10) the fit does not settle on a normal forest either.** It builds a huge canopy (LAI 11 to 14) and about twice the site's GPP (site 952 to 1,104), then removes the extra carbon with high respiration (`f_auto` 0.60 to 0.65). So with this model there are two ways to fit NEE: a thin canopy of very efficient leaves with the right GPP, or a huge canopy of ordinary leaves with double GPP. Neither is the real forest.
+- **The official CARDAMOM ranges confirm that the free fit is outside what DALEC users accept** (`PARS_INFO_831.c`, same values as for the base model): `ceff` 5 to 50 (free fit 110), leaf mass per area 5 to 200 g C m-2 (free fit 435). Temperature factor 0.018 to 0.08 (Q10 up to 2.2); all fits here sit at its upper edge (0.075 to 0.084).
+- **Why, from the ACM itself (computed with `acm.gpp`, a summer day at Hyytiala: Tmax 20, Tmin 10 degC, CO2 370, day 180).** GPP on a dull day (8 MJ m-2 d-1) and a bright day (28 MJ m-2 d-1):
+
+| Canopy | Dull day | Bright day | Bright / dull |
+|---|---|---|---|
+| LAI 3, `ceff` 10 (our prior centre) | 5.2 | 6.7 | 1.30 |
+| LAI 3, `ceff` 30 (needle-N value, D42) | 8.7 | 14.1 | 1.63 |
+| LAI 3, `ceff` 50 (official upper limit) | 9.9 | 17.6 | 1.78 |
+| LAI 11, `ceff` 10 (held fit) | 10.2 | 16.3 | 1.60 |
+| LAI 1.07, `ceff` 110 (free fit) | 5.3 | 11.7 | 2.19 |
+
+  With `ceff` near 10, ACM photosynthesis is capped by its leaf-efficiency (carboxylation) term, so GPP hardly rises with sunlight. NEE evidently varies with sunlight much more than that, and the fit has only two ways to get that response: very efficient leaves on a thin canopy, or a huge canopy. **The thin canopy is the model's way of making GPP follow light.** Hyytiala's own GPP model is a light-use-efficiency model (PRELES; Peltoniemi et al. 2015), which fits this picture. Still to confirm on the data: residuals of the held fit against daily radiation (Gelman et al. 2020, Section 6.1).
+- **Link to D42.** D42 lowered the `ceff` prior from D38's median 16.5 (7.4 to 37) to median 10 (5 to 20), and recorded the tension: needle nitrogen points to about 30. Its stated reason was that higher values make annual GPP implausibly high **in a model with no cold limit** (the canopy photosynthesises all winter). The cold-limit model removes that reason, so for the cold model the D42 narrowing has to be checked again by its own prior predictive check (proposed as D57). This is said openly: the posterior is now known to prefer high `ceff`, so any change must rest on the D38 and D42 sources and on the prior predictive check, not on the fit.
+
+**F23. Second speed test: dense mass matrix, target_accept 0.95 (D53; Roihu job 2344869, fake data, 2026-10-16).**
+- **D49 criteria: all PASS.** 0 divergences in 4,000 draws, 0 at the maximum tree depth; largest R-hat 1.004 (`h`); smallest effective sample size 1,038 (bulk) and 1,219 (tail); truth inside the 90% interval for 21 of 24 (outside: `theta_roo`, `c_roo_0`, `c_som_0`; `f_fol`, just outside in F16, is now inside).
+- **Time: 6.2 h against 29.4 h** for the diagonal run (about 119 instead of about 1,000 gradient evaluations per draw; step size about 0.036). Under the 20.5 h limit.
+- **Same answer:** compared with the diagonal run (F16) on the prior scale, every posterior median moved by at most 2.2% of the diagonal run's 90% interval width (largest `f_roo`), far under the 10% limit; interval widths 0.96 to 1.07 times the diagonal ones.
+- **Verdict under the rule fixed in advance: adopted** for full runs (D53). Raising target_accept from 0.9 (F19, 13 divergences) to 0.95 removed the divergences, as expected, at a cost of about 1.4 h.
 
 ## Part 5. Open items
 
@@ -854,6 +906,8 @@ Not yet re-assessed:
 - Pensa, M. and Jalkanen, R. (1999). Needle chronologies on Pinus sylvestris in northern Estonia and southern Finland. Silva Fennica 33(3), 171-177. doi:10.14214/sf.654 (pages to check)
 - Pinnington, E. M. et al. (2016). Investigating the role of prior and observation error correlations in improving a model forecast of forest carbon balance using Four-dimensional Variational data assimilation. Agricultural and Forest Meteorology 228-229, 299-314.
 - Pu, et al. (2025). MCI GPP. Scientific Data.
+- Peltoniemi, M., Pulkkinen, M., Aurela, M., Pumpanen, J., Kolari, P. and Makela, A. (2015). A semi-empirical model of boreal-forest gross primary production, evapotranspiration, and soil water: calibration and sensitivity analysis. Boreal Environment Research 20, 151-171. (check)
+- Richardson, A. D., Hollinger, D. Y., Burba, G. G. et al. (2006). A multi-site analysis of random error in tower-based measurements of carbon and energy fluxes. Agricultural and Forest Meteorology 136, 1-18. (check)
 - Richardson, A. D. et al. (2010). Estimating parameters of a forest ecosystem C model with measurements of stocks and fluxes as joint constraints. Oecologia 164, 25-40.
 - Schiestl-Aalto, P. (2017). Modelling intra- and inter-annual growth dynamics of Scots pine in the whole-tree carbon balance framework. Dissertationes Forestales 234.
 - Schiestl-Aalto, P. et al. (2013). Duration of shoot elongation in Scots pine varies within the crown and between years. Annals of Botany. doi:10.1093/aob/mct180 (title and year to check)

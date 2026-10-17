@@ -8,12 +8,15 @@ Figure L for context only. The D40 checks themselves live in
 `src/dalec/plausibility.py`, shared with the fake-data check (script 04).
 
 Run from the repository root:
-    python scripts/03_prior_predictive.py
+    python scripts/03_prior_predictive.py          main model (DALEC2)
+    python scripts/03_prior_predictive.py --cold   cold-limit model (D55) with its priors (D57)
 
-Makes two figures:
+Makes two figures (names end in _cold for the cold-limit model):
     L  fig_L_prior_predictive_nee      NEE through the year: prior range vs observed (context)
     M  fig_M_prior_predictive_checks   the D40 quantities, with their plausible bands
 """
+
+import argparse
 
 from typing import Any
 
@@ -31,7 +34,10 @@ from dalec.plotting import (
     BLUE, GREY_LIGHT, INK, INK_SOFT, UNIT_FLUX,
     apply_style, climatology, day_of_year_365, heading, save_figure, set_year_axis,
 )
-from dalec.priors import edc_log_weight, sample_prior, to_prior_scale
+from dalec.priors import (
+    COLD_MODEL_PRIOR_CHANGES, COLD_PRIORS, PRIORS, edc_log_weight, priors_for, sample_cold,
+    sample_prior, to_prior_scale,
+)
 
 # ---------------------------------------------------------------------------
 # Running the draws
@@ -86,7 +92,7 @@ def drivers_of_failure(raw: dict[str, np.ndarray], failed: np.ndarray, label: st
     return links
 
 
-def parameter_table(raw, tier1_links, tier2_links, config) -> None:
+def parameter_table(raw, tier1_links, tier2_links, config, suffix: str = "") -> None:
     """One row per sampled quantity: prior spread and link to each failure. Saved as csv."""
     rows = []
     for name, values in raw.items():
@@ -99,7 +105,7 @@ def parameter_table(raw, tier1_links, tier2_links, config) -> None:
             "link_tier2_failure": tier2_links.get(name, np.nan),
         })
     table = pd.DataFrame(rows).set_index("parameter")
-    path = resolve_path(config["paths"]["figures"]) / "prior_predictive_parameters.csv"
+    path = resolve_path(config["paths"]["figures"]) / f"prior_predictive_parameters{suffix}.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(path, float_format="%.6g")
     print(f"\n  saved {path}")
@@ -133,13 +139,15 @@ def weighted_report(result: dict[str, Any], w: np.ndarray, title: str) -> None:
           f"{TIER2_TARGET:.0%})  -> {'PASS' if t2 >= TIER2_TARGET else 'FAIL'}")
     for name, flag in result["tier2"].items():
         print(f"      {name:14s} {np.sum(w * flag) / total:6.1%} inside the band")
+    return t1, t2
 
 
 # ---------------------------------------------------------------------------
 # Figures
 # ---------------------------------------------------------------------------
 
-def figure_l(m: dict[str, np.ndarray], observed: pd.DataFrame, config: dict[str, Any]) -> None:
+def figure_l(m: dict[str, np.ndarray], observed: pd.DataFrame, config: dict[str, Any],
+             suffix: str = "") -> None:
     """Prior predictive range of the NEE seasonal cycle, observed cycle for context."""
     ok = ~evaluate(m)["tier1_fail"]
     cycle = m["nee_cycle"][ok]
@@ -155,13 +163,14 @@ def figure_l(m: dict[str, np.ndarray], observed: pd.DataFrame, config: dict[str,
     ax.axhline(0, color=INK_SOFT, lw=0.8)
     set_year_axis(ax)
     start, end = year_block(config, "calibration")
-    ax.set_title(f"NEE through the year implied by the priors, {start}-{end}")
+    model = " (cold-limit model)" if suffix == "_cold" else ""
+    ax.set_title(f"NEE through the year implied by the priors{model}, {start}-{end}")
     ax.set_ylabel(f"NEE ({UNIT_FLUX})\nnegative = forest takes up carbon")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncols=2)
-    save_figure(fig, "fig_L_prior_predictive_nee", config)
+    save_figure(fig, f"fig_L_prior_predictive_nee{suffix}", config)
 
 
-def figure_m(m: dict[str, np.ndarray], config: dict[str, Any]) -> None:
+def figure_m(m: dict[str, np.ndarray], config: dict[str, Any], suffix: str = "") -> None:
     """Histograms of the D40 quantities with their plausible bands shaded."""
     ok = ~evaluate(m)["tier1_fail"]
     fig, axes = plt.subplots(2, 4, figsize=(13, 6))
@@ -180,14 +189,20 @@ def figure_m(m: dict[str, np.ndarray], config: dict[str, Any]) -> None:
     ax.axis("off")
     ax.text(0, 0.6, "grey band = plausible range (D40)\nbars = draws that are\nphysically possible",
             fontsize=9, va="center")
-    fig.suptitle("What the priors imply about the forest (prior predictive, D40)", fontsize=10)
+    model = ", cold-limit model" if suffix == "_cold" else ""
+    fig.suptitle(f"What the priors imply about the forest (prior predictive, D40{model})", fontsize=10)
     fig.tight_layout()
-    save_figure(fig, "fig_M_prior_predictive_checks", config)
+    save_figure(fig, f"fig_M_prior_predictive_checks{suffix}", config)
 
 
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--cold", action="store_true",
+                        help="cold-limit model (D55) with its own priors (D57)")
+    args = parser.parse_args()
+
     config = load_config()
     apply_style()
     settings = config["prior_predictive"]
@@ -197,14 +212,19 @@ def main() -> None:
     years = data.index.year.to_numpy()
     weights = doy_weights(pd.DatetimeIndex(data.index))
     latitude = float(config["site"]["latitude_deg"])
+    batch_size = int(settings["batch_size"])
+    qc_pass = data[MASK_NEE] & data[MASK_QC]
+    observed = climatology(data[config["columns"]["nee"]].where(qc_pass))
 
     rng = np.random.default_rng(int(settings["seed"]))
+    if args.cold:
+        cold_model(drivers, years, weights, latitude, batch_size, observed, settings, config, rng)
+        return
     params, raw = sample_prior(int(settings["n_draws"]), rng)
 
     heading(f"Running {settings['n_draws']} prior draws over {drivers.n_days} days "
             "(main model: no frost cut-off)")
-    main_run = run_and_summarise(params, drivers, latitude, None, years, weights,
-                                 int(settings["batch_size"]))
+    main_run = run_and_summarise(params, drivers, latitude, None, years, weights, batch_size)
     main_result = evaluate(main_run)
     report(main_result, "Prior predictive check, main model (D40)")
     tier1_links = drivers_of_failure(raw, main_result["tier1_fail"], "Tier 1 failure")
@@ -213,8 +233,7 @@ def main() -> None:
 
     heading("Same draws with the frost switch on (D24), reported alongside")
     frost = float(config["model"]["frost_cutoff"]["threshold_degc"])
-    frost_run = run_and_summarise(params, drivers, latitude, frost, years, weights,
-                                  int(settings["batch_size"]))
+    frost_run = run_and_summarise(params, drivers, latitude, frost, years, weights, batch_size)
     report(evaluate(frost_run), f"Prior predictive check, frost cut-off at {frost} degC")
 
     weighted_report(main_result, edc_weights(main_run),
@@ -227,10 +246,77 @@ def main() -> None:
     for name in TIER2_BANDS:
         print(f"  {name:14s} median {np.median(main_run[name][ok]):9.2f}")
 
-    qc_pass = data[MASK_NEE] & data[MASK_QC]
-    observed = climatology(data[config["columns"]["nee"]].where(qc_pass))
     figure_l(main_run, observed, config)
     figure_m(main_run, config)
+
+
+# The main model was accepted with Tier 1 at 6.4% under the soft foliage
+# constraint (F15, a narrow miss of the 5% target). The cold-limit model may not
+# do clearly worse: at most 7% (D57; with about 800 effective draws the Monte
+# Carlo error of such a rate is about 0.9 percentage points).
+COLD_MODEL_TIER1_LIMIT = 0.07
+
+
+def cold_model(drivers, years, weights, latitude, batch_size, observed, settings, config, rng) -> None:
+    """Prior predictive check of the cold-limit model (D55) with its priors (D57).
+
+    The same draws are also run with the `ceff` prior of the main model (D42), by
+    moving each `ceff` draw to the same position within the D42 prior, so the two
+    differ only in `ceff`.
+    """
+    n = int(settings["n_draws"])
+    priors = priors_for(cold=True)
+    params, raw = sample_prior(n, rng, priors)
+    raw.update(sample_cold(n, rng))
+    thresholds = tuple(raw[name] for name in COLD_PRIORS)
+    changed = ", ".join(f"{k} {v}" for k, v in COLD_MODEL_PRIOR_CHANGES.items())
+
+    heading(f"Running {n} prior draws over {drivers.n_days} days "
+            f"(cold-limit model, D55; priors changed for it, D57: {changed})")
+    cold_run = run_and_summarise(params, drivers, latitude, None, years, weights, batch_size,
+                                 cold=thresholds)
+    cold_result = evaluate(cold_run)
+    report(cold_result, "Prior predictive check, cold-limit model (D40, D57)")
+    tier1_links = drivers_of_failure(raw, cold_result["tier1_fail"], "Tier 1 failure")
+    tier2_links = drivers_of_failure(raw, ~cold_result["tier2_all"], "Tier 2 failure")
+    parameter_table(raw, tier1_links, tier2_links, config, suffix="_cold")
+    t1, t2 = weighted_report(cold_result, edc_weights(cold_run),
+                             "With the soft foliage constraint (D44), cold-limit model, by re-weighting")
+
+    # Same draws, ceff moved to the same position within the main model's prior (D42).
+    _, median_new, sd_new = priors["ceff"]
+    _, median_old, sd_old = PRIORS["ceff"]
+    z = np.log(raw["ceff"] / median_new) / sd_new
+    arrays = params.as_arrays()
+    arrays["ceff"] = median_old * np.exp(sd_old * z)
+    old_run = run_and_summarise(type(params)(**arrays), drivers, latitude, None, years, weights,
+                                batch_size, verbose=False, cold=thresholds)
+    old_result = evaluate(old_run)
+    report(old_result, "For comparison: same draws, ceff prior of the main model (D42)")
+    t1_old, t2_old = weighted_report(old_result, edc_weights(old_run),
+                                     "For comparison, with the soft foliage constraint (D44)")
+
+    heading("Medians of the plausible draws (cold-limit model; D42 ceff in brackets)")
+    ok, ok_old = ~cold_result["tier1_fail"], ~old_result["tier1_fail"]
+    for name in TIER2_BANDS:
+        print(f"  {name:14s} median {np.median(cold_run[name][ok]):9.2f}"
+              f"   ({np.median(old_run[name][ok_old]):9.2f})")
+
+    heading("D57 rule, fixed before running (with the soft foliage constraint, as fitted)")
+    rule = {
+        f"Tier 2 at least {TIER2_TARGET:.0%}": t2 >= TIER2_TARGET,
+        f"Tier 1 at most {COLD_MODEL_TIER1_LIMIT:.0%} (main model accepted at 6.4%, F15)":
+            t1 <= COLD_MODEL_TIER1_LIMIT,
+    }
+    for text, ok_rule in rule.items():
+        print(f"  {'PASS' if ok_rule else 'FAIL'}  {text}")
+    print(f"  (cold model: Tier 1 {t1:.1%}, Tier 2 {t2:.1%}; "
+          f"with the D42 ceff prior: Tier 1 {t1_old:.1%}, Tier 2 {t2_old:.1%})")
+    verdict = all(rule.values())
+    print(f"\n  -> {'use these priors for the cold-limit model' if verdict else 'keep the D42 ceff prior for the cold-limit model (D57 option B)'}")
+
+    figure_l(cold_run, observed, config, suffix="_cold")
+    figure_m(cold_run, config, suffix="_cold")
 
 
 if __name__ == "__main__":

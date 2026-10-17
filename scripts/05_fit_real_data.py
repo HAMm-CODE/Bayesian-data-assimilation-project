@@ -55,7 +55,7 @@ from dalec.posterior import (
     check_can_save, computation_checks, interval_figure, parameter_table,
     possible_draws, posterior_parameters, print_table_and_health, sampler_health, search_prior,
 )
-from dalec.priors import prior_median
+from dalec.priors import prior_median, priors_for, priors_to_text
 
 SEASONS = {"DJF": (12, 1, 2), "MAM": (3, 4, 5), "JJA": (6, 7, 8), "SON": (9, 10, 11)}
 
@@ -238,19 +238,21 @@ def main() -> None:
     apply_style()
     fit, settings, lik = config["fit"], dict(config["sampler"]), config["likelihood"]
     if args.quick:
-        settings.update({k: settings["quick"][k] for k in ("chains", "tune", "draws")})
+        settings.update({k: v for k, v in settings["quick"].items() if k != "years"})
     observation_model = args.observation_model or lik["observation_model"]
     mass_matrix = args.mass_matrix or settings["mass_matrix"]
     frost_on = args.frost or bool(config["model"]["frost_cutoff"]["enabled"])
     frost = float(config["model"]["frost_cutoff"]["threshold_degc"]) if frost_on else None
     if args.target_accept is not None:
         settings["target_accept"] = args.target_accept
-    ta_tag = ("" if float(settings["target_accept"]) == float(config["sampler"]["target_accept"])
-              else f"_ta{round(100 * float(settings['target_accept']))}")
-    fixed = {name: prior_median(name) for name in filter(None, args.fix.split(","))}
+    # Output names carry a sampler tag only when the setting was given on the
+    # command line; the config defaults (D53) carry none.
+    ta_tag = "" if args.target_accept is None else f"_ta{round(100 * float(settings['target_accept']))}"
+    mm_tag = "" if args.mass_matrix is None else f"_{args.mass_matrix}"
+    fixed = {name: prior_median(name, priors_for(args.cold)) for name in filter(None, args.fix.split(","))}
     fix_tag = ("_fix-" + "-".join(sorted(fixed))) if fixed else ""
     label = ("fit" + ("_model_error" if observation_model != "randunc_only" else "") + fix_tag
-             + ("_frost" if frost_on else "") + ("_cold" if args.cold else "") + ("_dense" if mass_matrix == "dense" else "") + ta_tag
+             + ("_frost" if frost_on else "") + ("_cold" if args.cold else "") + mm_tag + ta_tag
              + ("_quick" if args.quick else ""))
     interval = float(fit["interval"])
     batch_size = int(config["prior_predictive"]["batch_size"])
@@ -277,7 +279,8 @@ def main() -> None:
         print("  held fixed at their prior medians (D54): "
               + ", ".join(f"{k} = {v:.4g}" for k, v in fixed.items()))
     _, raw, _, checks = search_prior(drivers, years, latitude, frost, seed=int(fit["seed"]),
-                                     n_candidates=int(fit["n_candidates"]), batch_size=batch_size)
+                                     n_candidates=int(fit["n_candidates"]), batch_size=batch_size,
+                                     cold=args.cold)
     starts = possible_draws(checks, int(settings["chains"]))
     print(f"  chain starts = prior draws {starts} (each passes Tier 1, D45)")
     model = build_model(drivers, observed, sigma, use, latitude_deg=latitude,
@@ -294,6 +297,7 @@ def main() -> None:
     elapsed = time.perf_counter() - began
     print(f"  sampling took {elapsed / 3600:.1f} h "
           f"({elapsed / (int(settings['tune']) + int(settings['draws'])):.2f} s per iteration per chain)")
+    idata.attrs["priors"] = priors_to_text(priors_for(args.cold))   # D57: which priors were used
     out_dir = resolve_path(config["paths"]["results"])
     out_dir.mkdir(parents=True, exist_ok=True)
     idata.to_netcdf(out_dir / f"{label}.nc")

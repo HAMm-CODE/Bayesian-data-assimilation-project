@@ -79,3 +79,52 @@ def test_growing_and_shrinking_pools_are_penalised():
 def test_broken_runs_get_zero_weight():
     assert edc_log_weight(steady_state_ratio(100.0, 0.0, 50.0, 50.0) * -1) == -np.inf
     assert edc_log_weight(np.nan) == -np.inf
+
+
+# ---------------------------------------------------------------------------
+# The cold-limit model's priors (D55, D57)
+# ---------------------------------------------------------------------------
+
+from dalec.inference import initial_values  # noqa: E402
+from dalec.priors import (  # noqa: E402
+    COLD_MODEL_PRIOR_CHANGES, COLD_PRIORS, log_prior, priors_for, priors_from_attrs,
+    priors_to_text, sample_cold, to_prior_scale,
+)
+
+
+def test_cold_model_changes_only_ceff_to_the_d38_prior():
+    cold, main = priors_for(cold=True), priors_for(cold=False)
+    assert main == PRIORS
+    assert cold["ceff"] == ("lognormal", 16.5, 0.41)
+    assert {k for k in PRIORS if cold[k] != main[k]} == set(COLD_MODEL_PRIOR_CHANGES) == {"ceff"}
+
+
+def test_saved_prior_list_round_trips_and_old_fits_mean_main_priors():
+    cold = priors_for(cold=True)
+    assert priors_from_attrs({"priors": priors_to_text(cold)}) == cold
+    assert priors_from_attrs({}) == PRIORS      # fits saved before D57 used PRIORS
+
+
+def test_cold_thresholds_stay_in_their_ranges_and_centre_on_zero_scale():
+    draws = sample_cold(5000, np.random.default_rng(0))
+    for name, (low, high, _, _) in COLD_PRIORS.items():
+        assert low < draws[name].min() and draws[name].max() < high
+        assert abs(float(to_prior_scale(name, (low + high) / 2))) < 1e-9
+
+
+def test_log_prior_uses_the_given_prior_list():
+    _, raw = sample_prior(50, np.random.default_rng(1), priors_for(cold=True))
+    from scipy import stats
+    diff = log_prior(raw, priors_for(cold=True)) - log_prior(raw)
+    expected = (stats.lognorm(s=0.41, scale=16.5).logpdf(raw["ceff"])
+                - stats.lognorm(s=0.354, scale=10.0).logpdf(raw["ceff"]))
+    assert np.allclose(diff, expected)
+
+
+def test_chain_start_includes_cold_fractions():
+    rng = np.random.default_rng(2)
+    _, raw = sample_prior(3, rng, priors_for(cold=True))
+    raw.update(sample_cold(3, rng))
+    start = initial_values(raw, 1)
+    for name, (low, high, _, _) in COLD_PRIORS.items():
+        assert start[f"{name}_fraction"] == pytest.approx((raw[name][1] - low) / (high - low))

@@ -61,6 +61,43 @@ COLD_PRIORS: dict[str, tuple] = {   # name: (range low, range high, beta a, beta
     "cold_t_full": (0.0, 15.0, 2.0, 2.0),        # full photosynthesis at or above
 }
 
+# D57: the cold-limit model returns `ceff` to its first prior, D38 (median 16.5,
+# 95% 7.4 to 37, from p11 x needle N). D42 had narrowed it to median 10 because,
+# with no cold limit, higher values made annual GPP implausibly high; the cold
+# limit removes that reason. Checked by the prior predictive check of the cold
+# model (script 03 --cold) before any fit.
+COLD_MODEL_PRIOR_CHANGES: dict[str, tuple] = {
+    "ceff": ("lognormal", 16.5, 0.41),
+}
+
+
+def priors_for(cold: bool = False) -> dict[str, tuple]:
+    """The full prior list of one model version: the main model (PRIORS) or the
+    cold-limit model (PRIORS with COLD_MODEL_PRIOR_CHANGES, D57)."""
+    return {**PRIORS, **COLD_MODEL_PRIOR_CHANGES} if cold else dict(PRIORS)
+
+
+def priors_to_text(priors: dict[str, tuple]) -> str:
+    """The prior list as text, saved with each fit so later steps use the same priors."""
+    import json
+    return json.dumps(priors)
+
+
+def priors_from_attrs(attrs) -> dict[str, tuple]:
+    """The prior list a saved fit was made with. Fits saved before D57 carry no
+    list; they all used PRIORS."""
+    import json
+    if "priors" not in attrs:
+        return dict(PRIORS)
+    return {name: tuple(spec) for name, spec in json.loads(attrs["priors"]).items()}
+
+
+def sample_cold(n: int, rng: np.random.Generator) -> dict[str, np.ndarray]:
+    """Draw the two cold-limit thresholds (D55) from COLD_PRIORS, in degC."""
+    return {name: low + (high - low) * rng.beta(a, b, n)
+            for name, (low, high, a, b) in COLD_PRIORS.items()}
+
+
 # Needle lifespan 1/c_lf must stay inside the range of the offset polynomial (D31).
 C_LF_RANGE = (1.0 / 8.0, 1.0 / 1.001)
 
@@ -75,20 +112,22 @@ def _draw(kind: str, a: float, b: float, n: int, rng: np.random.Generator) -> np
     raise ValueError(f"unknown prior kind {kind!r}")
 
 
-def sample_prior(n: int, rng: np.random.Generator) -> tuple[Parameters, dict[str, np.ndarray]]:
-    """Draw n parameter sets from the priors.
+def sample_prior(n: int, rng: np.random.Generator,
+                 priors: dict[str, tuple] | None = None) -> tuple[Parameters, dict[str, np.ndarray]]:
+    """Draw n parameter sets from the priors (`PRIORS`, or another list from `priors_for`).
 
     Returns the Parameters for the model and a dict of every sampled quantity
     (including h and the four Dirichlet shares), for diagnostics.
     """
-    raw = {name: _draw(*spec, n, rng) for name, spec in PRIORS.items()}
+    priors = PRIORS if priors is None else priors
+    raw = {name: _draw(*spec, n, rng) for name, spec in priors.items()}
 
     # c_lf outside the polynomial's range (about 0.3% of draws): draw again
     # from the same prior until inside. This removes a tiny tail, recorded in D41.
     low, high = C_LF_RANGE
     bad = (raw["c_lf"] < low) | (raw["c_lf"] >= high)
     while bad.any():
-        raw["c_lf"][bad] = _draw(*PRIORS["c_lf"], int(bad.sum()), rng)
+        raw["c_lf"][bad] = _draw(*priors["c_lf"], int(bad.sum()), rng)
         bad = (raw["c_lf"] < low) | (raw["c_lf"] >= high)
 
     shares = rng.dirichlet(list(DIRICHLET_ALPHA.values()), n)
@@ -103,11 +142,11 @@ def sample_prior(n: int, rng: np.random.Generator) -> tuple[Parameters, dict[str
     return Parameters(**model_fields), raw
 
 
-def prior_median(name: str) -> float:
+def prior_median(name: str, priors: dict[str, tuple] | None = None) -> float:
     """The median of one prior: the value a parameter is held at when it is fixed (D54).
     For `c_lf`, the median of the truncated beta (D41)."""
     from scipy import stats
-    kind, a, b = PRIORS[name]
+    kind, a, b = (PRIORS if priors is None else priors)[name]
     if kind in ("lognormal", "normal"):
         return float(a)
     dist = stats.beta(a, b)
@@ -118,7 +157,7 @@ def prior_median(name: str) -> float:
     return float(dist.median())
 
 
-def log_prior(raw: dict[str, Any]) -> np.ndarray:
+def log_prior(raw: dict[str, Any], priors: dict[str, tuple] | None = None) -> np.ndarray:
     """Log prior density of parameter sets, the same density the PyMC model uses
     (D34 to D43, without the D44 soft term). `raw` holds the sampled quantities
     as `sample_prior` returns them: every PRIORS entry plus the four allocation
@@ -127,7 +166,7 @@ def log_prior(raw: dict[str, Any]) -> np.ndarray:
     from scipy.special import gammaln
 
     total = 0.0
-    for name, (kind, a, b) in PRIORS.items():
+    for name, (kind, a, b) in (PRIORS if priors is None else priors).items():
         x = np.asarray(raw[name], dtype=float)
         if kind == "lognormal":
             total = total + stats.lognorm(s=b, scale=a).logpdf(x)
@@ -154,6 +193,10 @@ def to_prior_scale(name: str, values) -> np.ndarray:
     log-normal priors, logit for fractions (beta priors and the four allocation
     shares), unchanged for normal priors. Used to compare spreads fairly."""
     values = np.asarray(values, dtype=float)
+    if name in COLD_PRIORS:          # a fraction of its range (D55)
+        low, high = COLD_PRIORS[name][:2]
+        v = np.clip((values - low) / (high - low), 1e-12, 1 - 1e-12)
+        return np.log(v / (1 - v))
     kind = PRIORS[name][0] if name in PRIORS else "dirichlet"
     if kind == "lognormal":
         return np.log(values)

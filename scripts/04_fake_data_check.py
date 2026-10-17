@@ -23,9 +23,10 @@ The quick run judges nothing; it only shows that every step works and prints
 a rough time estimate for the full run.
 
 Saves:
-    results/fake_data_check[_dense][_quick].nc       all posterior draws (not tracked by git)
-    figures/fake_data_recovery[_dense][_quick].csv   one row per quantity: truth, prior, posterior
-    N  fig_N_fake_data_recovery[_dense][_quick]      prior range, posterior range and truth
+    results/fake_data_check[_<mass matrix>][_taNN][_quick].nc   all posterior draws (not tracked by git)
+    figures/fake_data_recovery[...].csv   one row per quantity: truth, prior, posterior
+    (the sampler tags appear only when --mass-matrix or --target-accept is given)
+    N  fig_N_fake_data_recovery[...]      prior range, posterior range and truth
 """
 
 import argparse
@@ -39,6 +40,7 @@ from dalec.data_io import MASK_USE, load_model_block
 from dalec.inference import MASS_MATRIX_INIT, build_model, initial_values, sample
 from dalec.model_numpy import Parameters, drivers_from_frame, run
 from dalec.plotting import apply_style, heading
+from dalec.priors import PRIORS, priors_to_text
 from dalec.posterior import (
     QUANTITIES, check_can_save, computation_checks, first_days, interval_figure,
     parameter_table, possible_draws, print_table_and_health, sampler_health, search_prior,
@@ -112,13 +114,15 @@ def main() -> None:
     apply_style()
     fake, settings = config["fake_data"], dict(config["sampler"])
     if args.quick:
-        settings.update({k: settings["quick"][k] for k in ("chains", "tune", "draws")})
+        settings.update({k: v for k, v in settings["quick"].items() if k != "years"})
     mass_matrix = args.mass_matrix or settings["mass_matrix"]
     if args.target_accept is not None:
         settings["target_accept"] = args.target_accept
-    ta_tag = ("" if float(settings["target_accept"]) == float(config["sampler"]["target_accept"])
-              else f"_ta{round(100 * float(settings['target_accept']))}")
-    suffix = ("_dense" if mass_matrix == "dense" else "") + ta_tag + ("_quick" if args.quick else "")
+    # Output names carry a sampler tag only when the setting was given on the
+    # command line; the config defaults (D53) carry none.
+    ta_tag = "" if args.target_accept is None else f"_ta{round(100 * float(settings['target_accept']))}"
+    mm_tag = "" if args.mass_matrix is None else f"_{args.mass_matrix}"
+    suffix = mm_tag + ta_tag + ("_quick" if args.quick else "")
 
     data = load_model_block(config, block="calibration")
     drivers = drivers_from_frame(data, config)
@@ -172,6 +176,7 @@ def main() -> None:
 
     out_dir = resolve_path(config["paths"]["results"])
     out_dir.mkdir(parents=True, exist_ok=True)
+    idata.attrs["priors"] = priors_to_text(PRIORS)   # D57: which priors were used
     idata.to_netcdf(out_dir / f"fake_data_check{suffix}.nc")
     print(f"  saved {out_dir / f'fake_data_check{suffix}.nc'}")
 
