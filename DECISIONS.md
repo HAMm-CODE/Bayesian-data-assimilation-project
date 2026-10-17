@@ -569,7 +569,7 @@ with both thresholds calibrated. Here Tmin is the daily minimum (the model is da
 - In between: no clear answer from quick fits; decided on full fits with a proper comparison (PSIS-LOO, Vehtari et al. 2017).
 (For scale: S2 without the cold limit lost about 110 against S1, F20.) This is a diagnostic comparison of quick fits, not a formal model choice.
 
-### D57. Priors of the cold-limit model: `ceff` returns to its first prior, D38 (Decided as a test, 2026-10-16)
+### D57. Priors of the cold-limit model: `ceff` returns to its first prior, D38 (Tested 2026-10-16/17: FAILED, so not adopted; see F24)
 **Why.** F22: with `ceff` near 10, ACM photosynthesis hardly rises with sunlight, and the fit escapes to an implausible canopy. D42 had lowered `ceff` from D38's median 16.5 (95% 7.4 to 37, built from p11 x needle N before any data were seen) to median 10 (95% 5 to 20). Its only stated reason: with no cold limit, higher values make annual GPP implausibly high, because the canopy photosynthesises through the winter. The cold-limit model removes that reason, so the narrowing has to be checked again for that model.
 
 **What.** In the cold-limit model only, `ceff ~ LogNormal(median 16.5, sdlog 0.41)` (D38). Everything else as before. The main model keeps D42.
@@ -577,7 +577,9 @@ with both thresholds calibrated. Here Tmin is the daily minimum (the model is da
 
 **Check before any fit (prior predictive, script 03 `--cold`, no tower NEE used).** Same 1,000-draw design and D40 checks as F13 to F15, with the soft foliage constraint (D44) as fitted. **Rule, fixed before running:** use the D38 `ceff` prior in the cold model if Tier 2 is at least 50% and Tier 1 at most 7% (the main model was accepted at 6.4%, F15; with about 800 effective draws the Monte Carlo error of such a rate is about 0.9 percentage points). Otherwise keep D42 for the cold model too (option B of F22). The script also runs the same draws with the D42 `ceff` prior, for comparison.
 
-**Then:** a quick fit of the cold model (`--cold`), judged like F21 and F22. If it is believable, the cold model goes through the fake-data check and the full fit (D55).
+**Outcome (F24): FAIL on Tier 1 (18.7%, mostly daily GPP above 20). Under the rule, the cold-limit model keeps the D42 `ceff` prior**; `COLD_MODEL_PRIOR_CHANGES` is now empty. The code that saves each fit's prior list stays.
+
+**Planned next step if it had passed:** a quick fit of the cold model (`--cold`), judged like F21 and F22. If it is believable, the cold model goes through the fake-data check and the full fit (D55).
 
 **Gelman et al. (2020) on this step:**
 - Section 2.4: prior predictive checks "provide a way to refine the model without using the data multiple times". That is why the decision rests on the prior predictive check and on the D38 and D42 sources, not on the fit.
@@ -825,6 +827,32 @@ Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily m
 - **Time: 6.2 h against 29.4 h** for the diagonal run (about 119 instead of about 1,000 gradient evaluations per draw; step size about 0.036). Under the 20.5 h limit.
 - **Same answer:** compared with the diagonal run (F16) on the prior scale, every posterior median moved by at most 2.2% of the diagonal run's 90% interval width (largest `f_roo`), far under the 10% limit; interval widths 0.96 to 1.07 times the diagonal ones.
 - **Verdict under the rule fixed in advance: adopted** for full runs (D53). Raising target_accept from 0.9 (F19, 13 divergences) to 0.95 removed the divergences, as expected, at a cost of about 1.4 h.
+
+**F24. Prior predictive check of the cold-limit model with the D38 `ceff` prior (D57; Roihu interactive job 2358821, real weather, no NEE used, 2026-10-17).** 1,000 draws; the same draws re-run with the D42 `ceff` prior.
+
+| With the soft foliage constraint (as fitted) | D38 `ceff` (median 16.5) | D42 `ceff` (median 10) | Target |
+|---|---|---|---|
+| Tier 1, impossible | **18.7%** (daily GPP above 20: 18.5%) | 4.0% | at most 7% (D57) |
+| Tier 2, plausible | 60.7% | 63.6% | at least 50% |
+| Median annual GPP of plausible draws (unweighted) | 1,096 | 652 | site 952 to 1,104 |
+| Median peak LAI of plausible draws (unweighted) | 3.2 | 2.45 | site 2.5 to 4 |
+
+- **Verdict under the rule fixed in advance: FAIL.** The cold-limit model keeps the D42 prior (D57 option B). The strongest link to failure is high `ceff` (+1.24), then low `lma` (-0.88).
+- **What fails is the daily peak, not the yearly total.** With D38 the plausible draws have about the right annual GPP and LAI, but almost one draw in five has summer days above 20 g C m-2 d-1 (observed daily GPP at Hyytiala stays far below that).
+- **The cold model with the D42 prior passes** (Tier 1 4.0%, Tier 2 63.6%), slightly better than the main model (F15: 6.4%, 63.1%). So the cold-limit model with unchanged priors has a sound prior predictive check; its first quick fit is F21.
+
+**What F22 and F24 together point to: ACM's fixed light-use efficiency.** In the ACM, light-limited photosynthesis is `e0 x radiation`, with `e0 = a7 LAI^2 / (LAI^2 + a9)` and `a7` = 7.19, `a9` = 2.10 fixed (fitted at the temperate Loobos site, D22). `e0` is 2.5 at LAI 1.07 and 5.8 at LAI 3. A summer day computed with `acm.gpp` (Tmax 20, Tmin 10 degC; dull 8, bright 28 MJ m-2 d-1):
+
+| Canopy | Dull | Bright | Bright / dull |
+|---|---|---|---|
+| Free cold fit: LAI 1.07, `ceff` 110 | 5.3 | 11.7 | 2.19 |
+| LAI 3, `ceff` 110, `a7` as fixed | 10.9 | 21.0 | 1.93 |
+| LAI 3, `ceff` 16.5, `a7` as fixed | 6.8 | 9.8 | 1.43 |
+| LAI 3, `ceff` 30, `a7` x 0.45 | 5.2 | 10.8 | 2.06 |
+
+- The data ask for GPP that rises strongly with light (F22) but stays moderate on bright days. With `a7` fixed, a normal canopy can give one or the other: efficient leaves on a normal canopy overshoot (21 on a bright day, as in F24), ordinary leaves barely respond to light. **Shrinking the canopy is the only way the model has to lower its light-use efficiency.**
+- The last row shows the alternative: a normal canopy (LAI 3) with `ceff` 30, the value needle nitrogen suggests (D42), and `a7` at about 45% of the Loobos value gives the same response as the free fit.
+- **Hypothesis (not yet tested on data):** the thin canopy compensates for an ACM light-use efficiency that is too high for this boreal site. This also explains why the fit could not be repaired by priors on the canopy (F20, F22) or on `ceff` (F24). A possible test: let `a7` be estimated (D58, proposed).
 
 ## Part 5. Open items
 

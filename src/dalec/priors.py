@@ -61,14 +61,12 @@ COLD_PRIORS: dict[str, tuple] = {   # name: (range low, range high, beta a, beta
     "cold_t_full": (0.0, 15.0, 2.0, 2.0),        # full photosynthesis at or above
 }
 
-# D57: the cold-limit model returns `ceff` to its first prior, D38 (median 16.5,
-# 95% 7.4 to 37, from p11 x needle N). D42 had narrowed it to median 10 because,
-# with no cold limit, higher values made annual GPP implausibly high; the cold
-# limit removes that reason. Checked by the prior predictive check of the cold
-# model (script 03 --cold) before any fit.
-COLD_MODEL_PRIOR_CHANGES: dict[str, tuple] = {
-    "ceff": ("lognormal", 16.5, 0.41),
-}
+# Priors that differ in the cold-limit model. D57 tested returning `ceff` to its
+# first prior (D38: median 16.5, sdlog 0.41) and it FAILED its prior predictive
+# check (F24: 18.7% of draws with daily GPP above 20), so under the rule fixed in
+# advance the cold-limit model keeps the main priors and this list is empty.
+# The mechanism stays so that any later change is explicit and saved with each fit.
+COLD_MODEL_PRIOR_CHANGES: dict[str, tuple] = {}
 
 
 def priors_for(cold: bool = False) -> dict[str, tuple]:

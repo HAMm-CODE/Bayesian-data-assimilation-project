@@ -92,16 +92,15 @@ from dalec.priors import (  # noqa: E402
 )
 
 
-def test_cold_model_changes_only_ceff_to_the_d38_prior():
-    cold, main = priors_for(cold=True), priors_for(cold=False)
-    assert main == PRIORS
-    assert cold["ceff"] == ("lognormal", 16.5, 0.41)
-    assert {k for k in PRIORS if cold[k] != main[k]} == set(COLD_MODEL_PRIOR_CHANGES) == {"ceff"}
+def test_cold_model_keeps_the_main_priors_after_d57_failed():
+    """D57 failed its prior check (F24), so the cold-limit model uses PRIORS unchanged."""
+    assert COLD_MODEL_PRIOR_CHANGES == {}
+    assert priors_for(cold=True) == priors_for(cold=False) == PRIORS
 
 
 def test_saved_prior_list_round_trips_and_old_fits_mean_main_priors():
-    cold = priors_for(cold=True)
-    assert priors_from_attrs({"priors": priors_to_text(cold)}) == cold
+    other = {**PRIORS, "ceff": ("lognormal", 16.5, 0.41)}
+    assert priors_from_attrs({"priors": priors_to_text(other)}) == other
     assert priors_from_attrs({}) == PRIORS      # fits saved before D57 used PRIORS
 
 
@@ -113,9 +112,10 @@ def test_cold_thresholds_stay_in_their_ranges_and_centre_on_zero_scale():
 
 
 def test_log_prior_uses_the_given_prior_list():
-    _, raw = sample_prior(50, np.random.default_rng(1), priors_for(cold=True))
+    other = {**PRIORS, "ceff": ("lognormal", 16.5, 0.41)}
+    _, raw = sample_prior(50, np.random.default_rng(1), other)
     from scipy import stats
-    diff = log_prior(raw, priors_for(cold=True)) - log_prior(raw)
+    diff = log_prior(raw, other) - log_prior(raw)
     expected = (stats.lognorm(s=0.41, scale=16.5).logpdf(raw["ceff"])
                 - stats.lognorm(s=0.354, scale=10.0).logpdf(raw["ceff"]))
     assert np.allclose(diff, expected)
