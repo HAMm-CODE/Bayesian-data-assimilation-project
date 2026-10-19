@@ -611,6 +611,18 @@ with both thresholds calibrated. Here Tmin is the daily minimum (the model is da
 
 **Criteria (fixed before running):** the four D49 criteria. The truth criterion keeps the same allowance of misses as D49 (4): with the two thresholds there are 26 quantities, so at least 22 of 26 must contain the truth (with 90% intervals, a perfect fit misses 5 or more of 26 in about 11% of runs, against about 9% for 5 or more of 24, so the test is almost equally strict).
 
+### D60. Figures and tables from a saved fit, for talks and the thesis (Decided, 2026-10-19)
+**What.** `scripts/talk_figures.py <label>` reads `results/<label>.nc` and makes, without sampling again: a summary table (csv, plus two booktabs halves for slides), trace plots (R), rank plots (S), prior against posterior (T) and posterior correlations (U) for every sampled quantity; with `--predict` (real-data fits) it runs 200 posterior draws forward for the NEE runs (V), the pools (W) and the sources of uncertainty (X). `scripts/show_data_columns.py` prints the data columns the model uses, for the data slide; it saves nothing.
+
+**Choices.**
+- **Rank plots next to trace plots** (Vehtari et al. 2021): a trace plot can look fine while chains mix slowly; rank plots show it as uneven bars.
+- **Prior against posterior uses the priors stored in the fit** (D57), so a fit made with other priors is drawn against its own.
+- **Correlations on the sampler's scale** (log or logit, D32). A strong correlation means NEE fixes a combination of the two quantities, not each one (RQ3).
+- **Figure X (RQ2) is descriptive.** Parameter uncertainty is the spread of the model's daily NEE across posterior draws, averaged by month over all days; measurement error is the mean RANDUNC on the days used; model error is the median `sigma_m`. The three are standard deviations: they do not add up (the total predictive spread is the square root of the sum of their squares).
+- **Figure W:** pools every 365 days from 1 January 1997, so "start of each year" drifts by one day per leap year.
+- **Slide table:** mean, 5%, 95%, R-hat and ESS, the smaller of bulk and tail as in the D49 rule; values failing the D49 rule are bold. Rates below 0.01 are shown in units of a power of ten (for example 10^-5 d^-1). The csv keeps every column.
+- **Layout:** sized for a 16:9 slide (drawn at about twice the slide size, with large fonts) and without titles: the slide or the thesis caption says what a figure shows. Chain colours were checked for colour-blind safety as a set.
+
 ## Part 3. Likelihood
 
 ### L1. Observation model: what sigma is (Decided, 2026-10-08; main model changed 2026-10-16)
@@ -806,7 +818,7 @@ Implementation (planned): the observation model will be a config setting (`randu
 | Log prior | -89 / -90 | -68 / -68 |
 | Model error sigma_m | 0.59 | 0.51 |
 | Lowest / highest LAI in a year | 0.40 | 0.61 (believable prior forests 0.69 to 0.83) |
-| `f_fol` | not printed then (0.015 to 0.017 in S1 and S4, F20) | 0.071 (prior median about 0.07) |
+| `f_fol` | 0.08 (F20; starved to 0.015 in S1 and S4) | 0.071 (prior median about 0.07) |
 | Peak LAI | about 1 | 1.07 |
 | `ceff` | about 110 | 110 |
 | `lma` | 400 to 460 | 425 to 445 |
@@ -876,6 +888,12 @@ Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily m
 - The data ask for GPP that rises strongly with light (F22) but stays moderate on bright days. With `a7` fixed, a normal canopy can give one or the other: efficient leaves on a normal canopy overshoot (21 on a bright day, as in F24), ordinary leaves barely respond to light. **Shrinking the canopy is the only way the model has to lower its light-use efficiency.**
 - The last row shows the alternative: a normal canopy (LAI 3) with `ceff` 30, the value needle nitrogen suggests (D42), and `a7` at about 45% of the Loobos value gives the same response as the free fit.
 - **Hypothesis (not yet tested on data):** the thin canopy compensates for an ACM light-use efficiency that is too high for this boreal site. This also explains why the fit could not be repaired by priors on the canopy (F20, F22) or on `ceff` (F24). A possible test: let `a7` be estimated (D58, proposed).
+
+**F25. Prior predictive check of the cold-limit model with `a7` sampled (D58 step 1; Roihu interactive job 2358821, real weather, no NEE used, 2026-10-17).** Same 1,000-draw design; the same draws re-run with `a7` fixed.
+- **With the soft foliage constraint (as fitted): Tier 1 4.3%, Tier 2 62.0%. D58 rule: PASS**, so the quick fit goes ahead. With `a7` fixed, the same draws give 4.0% and 63.6%: sampling `a7` hardly changes what the priors imply about the forest.
+- Without the constraint Tier 2 is 37.2% (39.4% with `a7` fixed); the constraint mainly removes draws whose foliage pool runs down, as in F15.
+- Tier 1 failures link most to high `ceff` (+1.33), low `lma` (-1.13) and high `a7` (+0.85): the same "too much light-use" direction as F24.
+- Also submitted on 2026-10-17: the fake-data check of the cold-limit model (D59), Roihu job 2359179.
 
 ## Part 5. Open items
 
