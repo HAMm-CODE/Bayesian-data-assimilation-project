@@ -623,6 +623,25 @@ with both thresholds calibrated. Here Tmin is the daily minimum (the model is da
 - **Slide table:** mean, 5%, 95%, R-hat and ESS, the smaller of bulk and tail as in the D49 rule; values failing the D49 rule are bold. Rates below 0.01 are shown in units of a power of ten (for example 10^-5 d^-1). The csv keeps every column.
 - **Layout:** sized for a 16:9 slide (drawn at about twice the slide size, with large fonts) and without titles: the slide or the thesis caption says what a figure shows. Chain colours were checked for colour-blind safety as a set.
 
+### D61. Testing on the held-back years and comparing models: rules fixed before reading the full fits (Decided, 2026-10-21; closes OPEN-1)
+**When written.** After the two full fits of 2026-10-19 finished (jobs 2369912, cold model; 2369913, main model with the dense setting) and before any of their results beyond the run time were read. Fixing the rules first stops the choice of test days or of the margin from being tuned to the answer.
+
+**Which fits.** Only fits that pass the D49 computation checks (no divergences, R-hat below 1.01, ESS at least 400 bulk and tail) are tested or compared. The `a7` model (D58, F28) is not part of the comparison: it has not been through its own prior and fake-data checks.
+
+**Main test: the held-back years 2011 to 2014 (Gelman et al. 2020, Section 6.2; the plan of D4).** For each fit, 1,000 posterior draws are run forward from 1 January 1997 straight through 31 December 2014 with the drivers of every day, so the pools at the start of 2011 come from the fitted years and the model has never seen the test years. Measured on the test days:
+1. **Log predictive density (the decision score):** for each test day, log of the average over draws of Normal(observed NEE | model NEE, sqrt(RANDUNC^2 + sigma_m^2)), summed over the test days. It rewards a model that is both close to the data and honest about its uncertainty.
+2. Coverage of the 90% predictive interval, overall and by season.
+3. RMSE and mean bias (observed minus model) of the posterior mean.
+4. NEE summed per test year over the test days (like for like).
+
+**Test days (closes OPEN-1).** Primary: the same rule as for fitting (D12): NEE present, QC at least 0.75 and RANDUNC present, 810 days in 2011-2014. Every measure uses these days. Secondary: RMSE and bias also on the 1,418 days that pass QC alone (RANDUNC is not needed for those two), reported alongside, not used for the decision.
+
+**When is one model clearly better.** The difference in the decision score, with the standard error from the day-by-day differences (as in Vehtari et al. 2017). Neighbouring days are correlated (F11), so the standard error is widened by sqrt((1 + r) / (1 - r)), with r the correlation between the differences on consecutive test days (only when r is positive). A model is clearly better when its score is higher by more than twice this widened standard error. Otherwise there is no clear difference: both are reported, and the preferred model is the one whose forest is believable (share of draws passing the D40 Tier 2 checks over 1997-2010, and peak LAI against the site's 2.5 to 4).
+
+**Also reported, not used for the decision:** PSIS-LOO on the 4,413 assimilable days of 1997-2010 (Vehtari et al. 2017), from the same 1,000 draws, with the Pareto k diagnostic. It is stated as optimistic: leaving out one day while its correlated neighbours stay in makes prediction look easier than it is.
+
+**Code:** `scripts/06_evaluate.py <fit> [<fit> ...]`; settings in the `evaluation` section of `config/default.yaml`. Nothing is sampled again.
+
 ## Part 3. Likelihood
 
 ### L1. Observation model: what sigma is (Decided, 2026-10-08; main model changed 2026-10-16)
@@ -895,11 +914,31 @@ Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily m
 - Tier 1 failures link most to high `ceff` (+1.33), low `lma` (-1.13) and high `a7` (+0.85): the same "too much light-use" direction as F24.
 - Also submitted on 2026-10-17: the fake-data check of the cold-limit model (D59), Roihu job 2359179.
 
+**F26. Fake-data check of the cold-limit model: PASS (D59; Roihu job 2359179, dense mass matrix, target_accept 0.95, 17 h 6 min, finished 2026-10-18).**
+- **D49 criteria: all pass.** 0 divergences of 4,000 draws, no draw at the maximum tree depth; largest R-hat 1.0051 (`f_lab`); smallest ESS bulk 2,280, tail 2,420; truth inside the 90% interval for **24 of 26** (rule: at least 22).
+- **The two misses.** `cr_onset`: truth 106 d, interval 40 to 82 (the same parameter is only partly informed in F16 too: NEE sees the timing of leaf growth more than its speed). `cold_t_full`: truth 5.57 degC, interval 4.84 to 5.41, so missed by 0.16 degC with a very narrow interval (posterior width 4.5% of the prior's). Two misses are about what chance gives with 26 quantities at 90%; the narrow `cold_t_full` interval is noted as something to watch on real data (many days near the threshold make it look better known than it may be).
+- **Both cold thresholds are strongly informed** (`t_shutdown` 13.9 to 13.2 below zero, width 14% of the prior's). NEE can identify the cold limit, which supports estimating it (D55).
+- **Informed by NEE:** 14 strongly, 12 partly, 0 not informed (main model F16: the starting wood pool was not informed).
+- **Cost:** about 500 gradient evaluations per draw (step size 0.0094), 17 h against 6.2 h for the main model with the same settings (F23). A full real-data fit of the cold model should be planned for well over a day.
+- **Consequence (D55, D59):** the cold-limit model is cleared, computationally, for its full fit on real NEE.
+
+**F27. Full fit of the main model on real NEE: FAILS the D49 computation criteria (D51; Roihu job 2344870, 29 h 11 min, finished 2026-10-17). Results not interpreted (D51 step 1).**
+- Largest R-hat 1.081 (`f_lab`); smallest ESS bulk 40, tail 84 (rules: below 1.01, at least 400). About 1,001 gradient evaluations per draw with a step size of 0.0011: the sampler was close to its maximum tree depth on most draws, the same sign of hard geometry as the first fake-data check (F16, D52). The log confirms the cause: it ran with the **diagonal** mass matrix and target_accept 0.9 (submitted before D53 made the dense matrix the default), had **29 divergences**, and **3,845 of 4,000 draws hit the maximum tree depth**. All three D49 computation checks fail.
+- **Not interpreted, recorded only:** the summaries look like the quick fits (peak LAI about 1.0, annual GPP about 1,050, Rh 508 above the site range 290 to 370, coverage of the 90% interval 89% overall with 99.9% in winter and 78% in summer). With R-hat 1.08 these numbers may change in a converged run.
+
+**F28. D58 quick fit: `a7` estimated (real NEE 1997-1998, model error and cold limit; Roihu job 2359287, 2 chains x 100 draws, 2026-10-17). Verdict under the D58 rules: UNCLEAR (4 of 5 conditions met; `ceff` just above its limit). Partly supports the hypothesis.**
+- **Each D58 condition:** chains agree, roughly (largest R-hat 1.03, ESS 75, no divergences; usual for a quick fit). Peak LAI median **2.23** (90%: 1.65 to 2.92; rule: at least 2): **met** by the median. `ceff` median **54** (40 to 76; rule: inside 5 to 50): **not met**, just above. `a7` median **3.16** (2.57 to 4.08; rule: below 5): **met**. Log-likelihood **-514.7 and -514.4** per chain (`diagnose_chains.py`), 5.8 below F21 (-508.7; rule: not more than 10 below): **met**. Per chain `ceff` is 64.6 and 54.6, both above 50. One condition fails, so by the rule fixed in advance the result is "unclear", not "supports". This is reported as it stands; the rule is not changed after seeing the result.
+- **What moved:** compared with the free cold fit (F21), peak LAI went from 1.07 to 2.23 and `ceff` from 110 to 54. `a7` came out at 44% of its fixed value 7.19, close to the F24 calculation (about 45%, i.e. 3.2) made before the fit. `a7` is strongly informed (posterior width 28% of the prior's), so NEE can identify it: the "not identifiable" outcome did not happen.
+- **What else moved:** the cold thresholds changed a lot (`t_shutdown` about -6 instead of -12.5 degC, `t_full` about 1.3 instead of 6 degC) and the temperature exponent rose to 0.083 (Q10 about 2.3). Heterotrophic respiration (460) is still above the site range (290 to 370). So freeing `a7` changes how the model splits the work between light use, cold and decay, not only the canopy.
+- **Still far from the priors:** `diagnose_chains.py` calls both chains "not believable": log prior about -53, while only 1 prior draw in 1,000 is below -36.6 (this log prior leaves out the `a7` and cold-threshold priors). Besides `ceff` (55 to 65, prior 5 to 20), needles live about 2.7 years (`c_lf` 0.37; prior 3 to 5 years), `f_auto` is 0.31 (prior 0.37 to 0.65) and the temperature exponent is about 2.4 times its prior median. Tier 2 plausibility is high (92% and 96%) because those checks look at the fluxes and LAI, not at the parameters.
+- **Reading:** the fixed `a7` explains the thin canopy (canopy and `a7` both move as predicted, and NEE identifies `a7`), but not the rest of the tension between the data and the priors. The fit to the data does not improve (5.8 worse); freeing `a7` moves the solution to a believable canopy at a small cost in fit.
+- **Seasonal fit:** 90.5% of days inside the 90% interval; winter -0.12, spring -0.01, summer +0.03, autumn -0.01 (similar to the cold fit, F21).
+- **Status:** a diagnostic only (D58 step 3). Even a clear "supports" would not adopt `a7` without the full workflow.
+- **Submitted on 2026-10-19 (72 h limit):** full fit of the cold-limit model on real NEE (Roihu job 2369912, `fit_model_error_cold`), and the main model again with the dense mass matrix and target_accept 0.95 (job 2369913, `fit_model_error_dense_ta95`), so that both models can be compared once converged.
+
 ## Part 5. Open items
 
 ### Still open
-
-**OPEN-1. Evaluation mask.** Evaluation needs sigma only for probability-based checks (for example, predictive interval coverage). Error measures like RMSE need only NEE and QC. Using QC alone keeps 1,418 instead of 810 evaluation days (adds 2014 and early 2011). Decide when designing the evaluation chapter.
 
 **OPEN-3. Spring onset number.** The previous EDA found a median observed onset of day 96 (range 58 to 117) with the 10-day rule, while project notes mention an observed onset of day 110 in the model comparison. The new code gives a median of day 100 (range 66 to 137) for 1997-2010 (F10), so three numbers now exist. These probably come from different definitions or data. Pick one definition (D16 uses the 10-day rule) and use it consistently in the thesis.
 
@@ -928,6 +967,8 @@ Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily m
 | Day-to-day correlated errors | for example AR(1) errors, if time allows | F11 |
 
 ### Closed
+
+**OPEN-1. Evaluation mask.** Closed 2026-10-21 (D61): the test uses the fitting rule (810 days); RMSE and bias are also reported on the 1,418 QC-only days.
 
 **OPEN-2. Which days each sigma figure uses.** Closed 2026-10-08 (D15).
 

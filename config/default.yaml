@@ -58,15 +58,17 @@ sampler:                       # NUTS settings, DECISIONS.md D49
   chains: 4
   tune: 1000                   # warm-up draws per chain (discarded)
   draws: 1000                  # kept draws per chain
-  target_accept: 0.9           # PyMC default 0.8; higher = smaller, safer steps
+  target_accept: 0.95          # D53 (was 0.9); PyMC default 0.8; higher = smaller, safer steps
   cores: 4                     # chains run side by side; set 1 if parallel runs fail
   seed: 20261014
-  mass_matrix: diagonal        # validated (F16); "dense" is the D52 speed test (--mass-matrix dense)
+  mass_matrix: dense           # D53, F23: same answer as diagonal (F16), 0 divergences, 6.2 h instead of 29.4 h
   quick:                       # --quick in scripts 04 and 05: 2 years, short chains (runs, nothing judged)
     years: 2
     chains: 2
     tune: 150
     draws: 100
+    mass_matrix: diagonal      # quick runs keep the earlier setting: 150 warm-up draws are too few
+    target_accept: 0.9         #   to learn a dense mass matrix, and quick runs stay comparable (F17 to F22)
 
 diagnostics:                   # D49 criteria 1 to 3; a fit must pass these before results are read
   max_rhat: 1.01
@@ -83,6 +85,12 @@ fit:                           # real-data fit, DECISIONS.md D51
   n_candidates: 200
   interval: 0.90               # posterior and predictive intervals
   n_predictive_draws: 400      # posterior draws run forward for the posterior predictive checks
+
+evaluation:                    # held-back years and model comparison, DECISIONS.md D61
+  seed: 20261021
+  n_draws: 1000                # posterior draws run forward from 1997 to the end of the test years
+  interval: 0.90               # predictive interval whose coverage is checked
+  clear_margin: 2.0            # "clearly better": score difference above this many (widened) standard errors
 
 eda:
   figure_formats: [pdf, png]   # pdf for the thesis, png for quick viewing
