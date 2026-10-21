@@ -1,0 +1,10 @@
+quantity,low,median,high,site value
+annual GPP,1037.78,1185.28,1352.74,"952 to 1,104"
+annual autotrophic respiration,384.504,516.934,701.891,
+annual heterotrophic respiration,358.378,389.497,424.252,290 to 370
+annual ecosystem respiration,767.811,914.495,1094.77,
+annual NEE (all days),-285.544,-270.698,-255.11,a sink
+peak LAI,0.919744,1.02723,1.16617,about 2.5 to 4
+"foliage pool, end / start",2.04631,2.33401,2.72752,
+"wood pool, end / start",1.02477,1.08919,1.16715,
+"soil pool, end / start",0.947666,0.979401,1.03752,
