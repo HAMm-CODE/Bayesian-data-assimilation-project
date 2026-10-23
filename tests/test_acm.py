@@ -1,155 +1,133 @@
-"""Chain by chain: where did each chain go, and why? (Gelman et al. 2020, Sections 5.1 and 5.6)
+"""Tests for src/dalec/acm.py. Run from the repository root with:  pytest"""
 
-When chains disagree (R-hat far above 1), there are two different stories:
-  1. a chain is STUCK in a poor region, while the believable region fits the
-     data at least as well (a sampling problem); or
-  2. the data PREFER an unbelievable region: no believable forest fits the NEE
-     as well, so the likelihood pulls the parameters away from their priors
-     (a model problem: the folk theorem, Section 5.1).
-For each chain this prints how well it fits the data (log-likelihood), how
-believable its parameters are (log prior), the soft foliage term (D44), and
-what forest it describes. The chain with the highest log posterior is the one
-the model "prefers"; whether that chain is believable decides the story.
+import math
 
-Run from the repository root, with the label of a saved fit:
-    python scripts/diagnose_chains.py fit_quick
-    python scripts/diagnose_chains.py fit
-Reads results/<label>.nc. Light work (a few minutes); fine on a login node.
-"""
-
-import argparse
-
-import arviz as az
 import numpy as np
-import pandas as pd
-from scipy import stats
+import pytest
 
-from dalec.config import load_config, resolve_path
-from dalec.data_io import MASK_USE, load_model_block
-from dalec.inference import SHARES
-from dalec.model_numpy import Parameters, drivers_from_frame, run
-from dalec.plausibility import evaluate, summarise_batch
-from dalec.plotting import heading
-from dalec.priors import PRIORS, edc_log_weight, log_prior, sample_prior, steady_state_ratio
+from dalec.acm import DALEC2_ACM, day_length_hours, frost_multiplier, gpp, solar_declination
 
-SHOW = ("ceff", "lma", "c_lf", "f_auto", "f_fol", "temperature_exponent", "c_fol_0", "c_som_0")
+LAT = 61.8474  # FI-Hyy
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("label", help="the fit's label, e.g. fit_quick or fit")
-    parser.add_argument("--draws-per-chain", type=int, default=25)
-    args = parser.parse_args()
+def acm_c_reference(lai, tmax, tmin, rad, co2, doy, ceff, lat):
+    """Independent scalar copy of ACM.c, line by line, using the math module.
 
-    config = load_config()
-    label = args.label
-    frost = (float(config["model"]["frost_cutoff"]["threshold_degc"])
-             if "_frost" in label or config["model"]["frost_cutoff"]["enabled"] else None)
-    data = load_model_block(config, block="calibration")
-    if label.endswith("_quick"):
-        years_all = data.index.year
-        data = data[years_all < years_all[0] + int(config["sampler"]["quick"]["years"])]
-    drivers = drivers_from_frame(data, config)
-    years = data.index.year.to_numpy()
-    latitude = float(config["site"]["latitude_deg"])
-    observed = data[config["columns"]["nee"]].to_numpy(dtype=float)
-    sigma = data[config["columns"]["sigma"]].to_numpy(dtype=float)
-    use = data[MASK_USE].to_numpy(dtype=bool)
-
-    idata = az.from_netcdf(resolve_path(config["paths"]["results"]) / f"{label}.nc")
-    post = idata.posterior
-    n_chains, n_draws = np.asarray(post["f_auto"].values).shape
-    pick = np.linspace(0, n_draws - 1, min(args.draws_per_chain, n_draws)).astype(int)
-    sampler_lp = np.asarray(idata.sample_stats["lp"].values)
-
-    heading(f"Chain by chain: {label} ({drivers.n_days} days, {int(use.sum())} assimilable; "
-            f"{pick.size} draws per chain)")
-    rows = []
-    for c in range(n_chains):
-        def values(name):
-            return np.asarray(post[name].values, dtype=float)[c, pick]
-        params = Parameters(**{f: values(f) for f in Parameters.__dataclass_fields__})
-        raw = {name: values(name) for name in PRIORS}
-        raw.update({name: values(name) for name in SHARES})
-        cold = ((values("cold_t_shutdown"), values("cold_t_full"))
-                if "cold_t_shutdown" in post.data_vars else None)
-        out = run(params, drivers, latitude_deg=latitude, frost_threshold_degc=frost, cold=cold)
-        sd = np.broadcast_to(sigma[use], (pick.size, int(use.sum())))
-        if "sigma_m" in post.data_vars:
-            sd = np.sqrt(sd**2 + values("sigma_m")[:, None] ** 2)
-        log_lik = stats.norm(out.nee[:, use], sd).logpdf(observed[use]).sum(axis=1)
-        rs = steady_state_ratio(out.pools_in["c_fol"], out.pools_out["c_fol"],
-                                out.pools_yearly["c_fol"].mean(axis=-1), out.pools_start["c_fol"])
-        soft = edc_log_weight(rs)
-        prior = log_prior(raw)
-        summary = summarise_batch(out, years)
-        checks = evaluate(summary)
-        tier1 = checks["tier1_fail"]
-        row = {
-            "chain": c,
-            "log-likelihood": np.median(log_lik),
-            "log prior": np.median(prior),
-            "soft foliage term": np.median(soft),
-            "log posterior": np.median(log_lik + prior + soft),
-            "sampler lp": np.median(sampler_lp[c]),
-            "impossible (Tier 1)": tier1.mean(),
-            "plausible (Tier 2)": checks["tier2_all"].mean(),
-            "annual GPP": np.median(summary["gpp"]),
-            "peak LAI": np.median(summary["peak_lai"]),
-        }
-        # How seasonal is the canopy? Lowest / highest LAI within each year, averaged
-        # over years: near 1 for an evergreen whose needle mass hardly changes.
-        swing = np.mean([out.lai[:, years == y].min(axis=1) / out.lai[:, years == y].max(axis=1)
-                         for y in np.unique(years)], axis=0)
-        row["LAI lowest / highest in a year"] = np.median(swing)
-        # A growing or shrinking canopy also lowers the ratio above, so show the trend too.
-        row["foliage pool, end / start"] = np.median(summary["foliage_ratio"])
-        if "sigma_m" in post.data_vars:
-            row["sigma_m (model error)"] = np.median(values("sigma_m"))
-        if cold is not None:
-            row["cold limit: no GPP below (degC)"] = np.median(cold[0])
-            row["cold limit: full GPP above (degC)"] = np.median(cold[1])
-        row.update({name: np.median(raw[name]) if name in raw else np.median(values(name))
-                    for name in SHOW})
-        rows.append(row)
-    table = pd.DataFrame(rows).set_index("chain")
-    with pd.option_context("display.width", 200, "display.max_columns", 30):
-        print(table.T.to_string(float_format=lambda v: f"{v:.4g}"))
-
-    # How believable is "believable"? The log prior of draws from the prior itself.
-    _, prior_draws = sample_prior(20_000, np.random.default_rng(1))
-    reference = log_prior(prior_draws)
-    floor = float(np.percentile(reference, 0.1))
-    heading("Reading it")
-    print(f"  log prior of draws from the prior itself: median {np.median(reference):.1f}; "
-          f"only 1 in 1,000 is below {floor:.1f}")
-    believable = ((table["impossible (Tier 1)"] < 0.5) & (table["plausible (Tier 2)"] >= 0.5)
-                  & (table["log prior"] >= floor))
-    for c in table.index:
-        verdict = "believable" if believable[c] else "NOT believable"
-        print(f"  chain {c}: {verdict} (Tier 1 impossible {table.loc[c, 'impossible (Tier 1)']:.0%}, "
-              f"Tier 2 plausible {table.loc[c, 'plausible (Tier 2)']:.0%}, "
-              f"log prior {table.loc[c, 'log prior']:.0f})")
-    best = table["log posterior"].idxmax()
-    print(f"  highest log posterior: chain {best}")
-    for c in table.index:
-        if c == best:
-            continue
-        gap_post = table.loc[best, "log posterior"] - table.loc[c, "log posterior"]
-        gap_lik = table.loc[best, "log-likelihood"] - table.loc[c, "log-likelihood"]
-        print(f"  chain {c}: log posterior {gap_post:.1f} lower than chain {best}; its fit to the "
-              f"data (log-likelihood) is {abs(gap_lik):.1f} {'worse' if gap_lik > 0 else 'better'}")
-    if not believable[best]:
-        print("  -> the best chain is not a believable forest: the data pull the parameters far "
-              "from the priors (story 2, a model problem, Section 5.1).")
-    gaps = table.loc[best, "log posterior"] - table["log posterior"]
-    if (gaps > 10).any():
-        print("  -> some chains sit in clearly poorer regions than the best one (log posterior "
-              "more than 10 lower): separate modes (Section 5.6), on top of any model problem.")
-    if believable.all():
-        print("  -> every chain is believable; compare their parameters for separate modes.")
-    print("  (Differences of a few units are noise; tens to thousands are decisive.)")
+    Written separately from acm.py so that a mistake in the numpy version
+    (for example a wrong bracket or broadcasting) shows up as a mismatch.
+    """
+    consts = [ceff, 0.0156935, 4.22273, 208.868, 0.0453194, 0.37836, 7.19298,
+              0.011136, 2.1001, 0.789798]
+    pi = 3.1415927  # the C code uses this rounded pi
+    gc = abs(-2.0) ** consts[9] / (consts[5] * 1.0 + 0.5 * (tmax - tmin))
+    pp = lai * 1.0 / gc * consts[0] * math.exp(consts[7] * tmax)
+    qq = consts[2] - consts[3]
+    ci = 0.5 * (co2 + qq - pp + ((co2 + qq - pp) ** 2 - 4 * (co2 * qq - pp * consts[2])) ** 0.5)
+    e0 = consts[6] * lai**2 / (lai**2 + consts[8])
+    dec = -23.4 * math.cos((360.0 * (doy + 10.0) / 365.0) * pi / 180.0) * pi / 180.0
+    mult = math.tan(lat * pi / 180) * math.tan(dec)
+    if mult >= 1:
+        dayl = 24.0
+    elif mult <= -1:
+        dayl = 0.0
+    else:
+        dayl = 24.0 * math.acos(-mult) / pi
+    cps = e0 * rad * gc * (co2 - ci) / (e0 * rad + gc * (co2 - ci))
+    return cps * (consts[1] * dayl + consts[4])
 
 
-if __name__ == "__main__":
-    main()
+def test_constants_match_official_code():
+    """D22: full-precision constants from DALEC_400.c."""
+    c = DALEC2_ACM
+    assert (c.a2, c.a3, c.a4, c.a5, c.a6) == (0.0156935, 4.22273, 208.868, 0.0453194, 0.37836)
+    assert (c.a7, c.a8, c.a9, c.a10) == (7.19298, 0.011136, 2.1001, 0.789798)
+    assert (c.psi_d, c.r_tot) == (-2.0, 1.0)
+
+
+@pytest.mark.parametrize("case", [
+    # lai, tmax, tmin, rad, co2, doy, ceff
+    (3.0, 22.0, 10.0, 20.0, 370.0, 180, 16.5),   # summer day
+    (3.5, -5.0, -12.0, 2.0, 380.0, 15, 16.5),    # winter day
+    (1.0, 12.0, 2.0, 10.0, 360.0, 120, 7.4),     # spring, thin canopy
+    (5.0, 28.0, 14.0, 28.0, 390.0, 200, 37.0),   # hot day, dense canopy
+])
+def test_matches_line_by_line_copy_of_acm_c(case):
+    lai, tmax, tmin, rad, co2, doy, ceff = case
+    expected = acm_c_reference(lai, tmax, tmin, rad, co2, doy, ceff, LAT)
+    got = gpp(lai=lai, t_max=tmax, t_min=tmin, sw_in=rad, co2=co2, doy=doy,
+              ceff=ceff, latitude_deg=LAT)
+    # Small differences only from the C code's rounded pi (3.1415927).
+    assert got == pytest.approx(expected, rel=1e-6)
+
+
+def test_day_length_at_hyytiala():
+    """About 19 h at midsummer, about 5 h at midwinter, about 12 h at equinox."""
+    assert 18.5 < day_length_hours(172, LAT) < 19.5
+    assert 4.5 < day_length_hours(355, LAT) < 5.5
+    assert 11.5 < day_length_hours(80, LAT) < 12.5
+
+
+def test_day_length_is_12_hours_at_equator():
+    days = np.arange(1, 366)
+    assert np.allclose(day_length_hours(days, 0.0), 12.0)
+
+
+def test_declination_peaks_at_june_solstice():
+    """D23: with doy + 10, the peak falls on day 172 or 173, not day 182."""
+    days = np.arange(1, 366)
+    assert days[np.argmax(solar_declination(days))] in (172, 173)
+
+
+def test_polar_day_and_night_give_24_and_0_hours():
+    assert day_length_hours(172, 80.0) == pytest.approx(24.0)
+    assert day_length_hours(355, 80.0) == pytest.approx(0.0)
+
+
+def test_no_leaves_or_no_light_gives_zero_not_nan():
+    common = dict(t_max=20.0, t_min=10.0, co2=370.0, doy=180, ceff=16.5, latitude_deg=LAT)
+    assert gpp(lai=0.0, sw_in=20.0, **common) == 0.0
+    assert gpp(lai=3.0, sw_in=0.0, **common) == 0.0
+
+
+def test_gpp_rises_with_leaves_light_and_co2():
+    base = dict(lai=3.0, t_max=20.0, t_min=10.0, sw_in=20.0, co2=370.0, doy=180,
+                ceff=16.5, latitude_deg=LAT)
+    g0 = gpp(**base)
+    assert gpp(**{**base, "lai": 4.0}) > g0
+    assert gpp(**{**base, "sw_in": 25.0}) > g0
+    assert gpp(**{**base, "co2": 400.0}) > g0
+
+
+def test_broadcasts_over_draws_and_days():
+    """One call for many parameter draws (rows) and many days (columns)."""
+    n_draws, n_days = 4, 10
+    ceff = np.linspace(8, 30, n_draws)[:, None]
+    lai = np.full((n_draws, n_days), 3.0)
+    days = np.arange(150, 150 + n_days)
+    out = gpp(lai=lai, t_max=np.full(n_days, 20.0), t_min=np.full(n_days, 10.0),
+              sw_in=np.full(n_days, 20.0), co2=np.full(n_days, 370.0), doy=days,
+              ceff=ceff, latitude_deg=LAT)
+    assert out.shape == (n_draws, n_days)
+    assert np.all(np.isfinite(out)) and np.all(out > 0)
+    one = gpp(lai=3.0, t_max=20.0, t_min=10.0, sw_in=20.0, co2=370.0, doy=150,
+              ceff=ceff[2, 0], latitude_deg=LAT)
+    assert out[2, 0] == pytest.approx(one)
+
+
+def test_summer_gpp_is_in_a_believable_range():
+    """A typical Hyytiala July day should give a few g C m-2 d-1, not 0.01 or 100."""
+    g = gpp(lai=3.5, t_max=22.0, t_min=11.0, sw_in=20.0, co2=375.0, doy=190,
+            ceff=16.5, latitude_deg=LAT)
+    assert 1.0 < g < 20.0
+
+
+def test_frost_multiplier():
+    t_max = np.array([0.0, -1.0, 5.0])
+    t_min = np.array([-6.0, -4.0, -1.0])   # midpoints -3.0, -2.5, 2.0
+    assert list(frost_multiplier(t_max, t_min, -2.0)) == [0.0, 0.0, 1.0]
+
+
+def test_cold_multiplier_is_a_ramp_between_the_thresholds():
+    from dalec.acm import cold_multiplier
+    t_min = np.array([-10.0, -7.0, -0.5, 6.0, 12.0])
+    assert np.allclose(cold_multiplier(t_min, -7.0, 6.0), [0.0, 0.0, 0.5, 1.0, 1.0])
