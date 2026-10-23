@@ -642,6 +642,53 @@ with both thresholds calibrated. Here Tmin is the daily minimum (the model is da
 
 **Code:** `scripts/06_evaluate.py <fit> [<fit> ...]`; settings in the `evaluation` section of `config/default.yaml`. Nothing is sampled again.
 
+### D62. The main model is not fitted again; the cold-limit model becomes the base model (Decided, 2026-10-23)
+**Why.** The main model (DALEC2 without the cold limit) has failed D49 on real NEE twice: with the diagonal setting (F27) and with the dense setting (F30). The second failure is not a tuning problem: the chains sit in two separate modes, and **no chain is a believable forest** (Tier 2 0%, peak LAI about 1, log prior far below every prior draw). Gelman et al. (2020, Section 5.1, the "folk theorem") read this as a problem of the model, not of the sampler, and Section 5.9 warns against changing sampler settings until the problem goes away. Smaller steps (a higher `target_accept`) help with divergences, not with separate modes.
+
+**What.**
+1. **The main model is not run again.** F27 and F30 are kept and reported as results: on 14 years of real NEE, DALEC2 with the ACM light-use efficiency fixed and no cold limit cannot be fitted to a believable forest at FI-Hyy.
+2. **The D61 comparison "main against cold" is reported as not possible.** D61 compares only fits that pass D49, and the main model's fit does not. This is stated in the thesis, not hidden.
+3. **The cold-limit model (D55) is the base model from now on, called M2** (26 quantities plus `sigma_m`). It passed its prior predictive check (F24) and its fake-data check (F26). Its full fit failed only on 7 divergences (F31), so it is fitted again with `target_accept` 0.99, the planned response of D49 and F31 (job "ta99": `fit_model_error_cold_dense_ta99`).
+4. **The question "which model" moves to the reduced cold models of D63.**
+
+### D63. Reduced cold models: holding fixed what the fake data showed NEE cannot learn (Decided, 2026-10-23, before any of these runs)
+**Why.** The supervisor asked to keep constant the parameters that, in the fake-data check, got almost no information from NEE. Gelman et al. (2020) support this: Section 5.2 (simplify the model when the computation is hard), Section 4.1 (the fake-data check shows which quantities the data can and cannot learn), and Section 7 (building a model up step by step and comparing the steps). A parameter that NEE cannot learn adds width to the sampler's search without adding anything the data can check, and it can create the long curved valleys where divergences happen.
+
+**Which quantities.** Chosen only from the cold model's fake-data check (F26), using the width ratio (posterior width divided by prior width; 1 means NEE taught nothing). The real-data fits were not used to choose. The ladder:
+
+| Model | Held fixed | Free quantities | Reason for this step |
+|---|---|---|---|
+| M2 | nothing (the cold model, D62) | 26 | the base |
+| MA | starting wood pool `c_woo_0` | 25 | the least informed (0.87); also the only "not informed" quantity in the main model's check (F16) |
+| MB | MA + starting soil pool `c_som_0` | 24 | the other large, slow pool (0.75): 14 years of NEE barely see where these two pools started |
+| MC | MB + soil and wood turnover `theta_som`, `theta_woo` | 22 | the rates of the same two slow pools (0.75 each) |
+| M0 | MC + the four growth shares (together), `h`, `cr_onset`, `lma`, `f_auto` | 14 | everything not "strongly informed" (width ratio 0.5 or more, the D49 boundary) |
+
+Notes on the ladder:
+- **Ordered by pool, not strictly by width ratio.** The share sent to the roots (`f_roo`, 0.86) is about as uninformed as `c_woo_0`, but the four growth shares come from one Dirichlet prior and sum to 1, so one share cannot be fixed alone. They are fixed together, at the Dirichlet mean, and only in M0.
+- `c_roo_0` (0.495) and `theta_roo` (0.487) are just under 0.5, so they stay free in M0. The 0.5 boundary was set in D49, before F26, and is not moved.
+- **Each model is nested in M2:** it is M2 with some quantities held at one value. So the ladder asks how much the fit and the predictions lose (or gain) when those quantities are no longer learned.
+
+**Fixed values.** Each fixed quantity is held at its prior median. The four growth shares are held at the mean of their Dirichlet prior, times (1 - `f_auto`) as in D28; when `f_auto` is fixed it is also at its prior median. The minimum turnover (`theta_min`) follows from the fixed values as before. The priors of the fixed quantities drop out of the posterior; nothing else in the model changes.
+
+**Fake-data check of each reduced model (Section 4.1, as D48 and D59).** The true forest is drawn from the reduced prior, so the fixed quantities take their fixed values in the truth too: the check asks whether the sampler and the remaining quantities work, not whether fixing is right (that is asked on real data, below). Same design and the same D49 criteria. The number of misses allowed is set by one rule for every model size: the smallest m such that, if each truth falls outside its 90% interval with probability 0.1, more than m misses happen in at most 12% of runs (`fake_data.miss_tail`). This gives 4 misses for 22 to 26 quantities, the same as D49 (20 of 24) and D59 (22 of 26), and 3 for the 14 of M0 (at least 11 of 14).
+
+**Sampler for all ladder runs:** dense mass matrix, `target_accept` 0.99 (the setting M2 now needs, D62), given on the command line, so file names end in `_dense_ta99`. The fake-data checks use the RANDUNC-only error model, as in D48; the real fits use the main error model (L1).
+
+**How the model is chosen (fixed now, before any result).**
+1. A model takes part only if its fake-data check passes and its real-data fit passes D49. A model that fails is reported with its failure.
+2. The models that take part are scored on the held-back years with the D61 decision score (log predictive density on the 810 test days).
+3. Every model whose score is within 2 widened standard errors of the best score (D61) counts as equally good.
+4. **Among the equally good models, the one with the fewest free quantities is chosen** (simplest first).
+5. **Safeguard:** a model whose forest is not believable (share of draws passing the D40 Tier 2 checks over 1997-2010 below 50%) is not chosen over an equally good believable one, even if it is smaller.
+6. Every model on the ladder is reported (scores, D49 results, believability), not only the chosen one. PSIS-LOO on the fitted years is reported as in D61, not used for the choice.
+
+**Not done, stated as limitations.**
+- No separate prior predictive check for the reduced models. Fixing quantities at their medians only removes spread from a prior that already passed (F24), but the reduced prior is not exactly a part of the full one, so this is an assumption. It can be checked cheaply later if needed.
+- The real-data posteriors may show other quantities as uninformed. They are not used to build a second ladder: that would choose the model from the same data it is tested against.
+
+**Code.** `fix_sets` in `config/default.yaml`; option `--fix-set MA` (MB, MC, M0) in scripts 04 and 05; fixing in `src/dalec/priors.py` (`fixed_values`, `apply_fixed`) and `src/dalec/inference.py` (the shares become a fixed value instead of a Dirichlet); checks in `tests/test_fix_sets.py`, including that the log density of M0 equals the hand computation of the full model minus the priors of the fixed quantities.
+
 ## Part 3. Likelihood
 
 ### L1. Observation model: what sigma is (Decided, 2026-10-08; main model changed 2026-10-16)
@@ -936,6 +983,21 @@ Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily m
 - **Status:** a diagnostic only (D58 step 3). Even a clear "supports" would not adopt `a7` without the full workflow.
 - **Submitted on 2026-10-19 (72 h limit):** full fit of the cold-limit model on real NEE (Roihu job 2369912, `fit_model_error_cold`), and the main model again with the dense mass matrix and target_accept 0.95 (job 2369913, `fit_model_error_dense_ta95`), so that both models can be compared once converged.
 
+**F29. Full fit of the cold-limit model on real NEE: narrowly FAILS D49; results not interpreted (Roihu job 2369912, 32.1 h, finished 2026-10-20).**
+- 0 divergences, but largest R-hat 1.0123 (`theta_som`) and smallest ESS 337 bulk (`lma`); rules: below 1.01, at least 400. 3,969 of 4,000 draws hit the maximum tree depth (about 1,023 gradient evaluations per draw, step size 0.0018).
+- **Cause found:** the job ran with the **diagonal** mass matrix and target_accept 0.9, not the D53 setting. The D53 change to `config/default.yaml` had not reached the repository on Roihu when the job was submitted (the `git pull` of 2026-10-21 brought it). The main-model rerun (F30) was not affected because its settings were given on the command line.
+- Not interpreted (D51 step 1). Recorded only: the summaries resemble the cold quick fit (peak LAI about 1.05, annual Rh 555 above the site range).
+
+**F30. Main model on real NEE with the D53 setting: FAILS D49 badly; results not interpreted (Roihu job 2369913, dense mass matrix, target_accept 0.95, 33.7 h, finished 2026-10-20).**
+- 17 divergences, largest R-hat **2.21** (`d_fall`; also `c_lf` 1.97, `cr_fall` 2.05, `cr_onset` 1.68), smallest ESS 5; 2,897 draws at the maximum tree depth. R-hat values near 2 mean the chains sit in different places: on 14 years of real NEE the main model (no cold limit) has more than one region of good fit, mostly in the leaf timing and leaf life parameters. The same setting passed on fake data (F23), so this is a property of the model and the real data, not of the code (Gelman et al. 2020, Section 5.1: a computational problem often points to a model problem).
+- **Chain by chain (`diagnose_chains.py`, 2026-10-21): two separate modes.** Chains 2 and 3 agree (log posterior -4,228 and -4,227); chains 0 and 1 sit in clearly poorer places (48 and 69 lower; log-likelihood 37 and 46 worse). They differ mainly in the share of growth sent to the leaves (`f_fol` 0.15 to 0.17 against 0.065 to 0.07), LMA (about 270 against 330) and the starting soil pool (about 6,200 against 7,800). **No chain is believable:** Tier 2 plausible 0% in every chain, peak LAI about 1.0, `ceff` about 100, log prior -128 to -149 (only 1 prior draw in 1,000 is below -36.6). So the main model has both a model problem (implausible forest) and a sampling problem on top (separate modes, Section 5.6).
+- Also submitted on 2026-10-21: the cold-limit model again with the D53 setting written out (Roihu job 2415129, `fit_model_error_cold_dense_ta95`, 72 h limit).
+
+**F31. Cold-limit model, full fit with the D53 setting: fails D49 on divergences only; results not interpreted (Roihu job 2415129, dense mass matrix, target_accept 0.95, 13 h 35 min, finished 2026-10-22).**
+- **7 divergences** of 4,000 draws (rule: none). Everything else passes clearly: largest R-hat 1.0055 (`ceff`), smallest ESS bulk 1,770 and tail 1,754, **no draw at the maximum tree depth** (against 3,969 of 4,000 with the diagonal setting, F29). The dense setting fixed the slow mixing; what is left is a few places where the step is still too large for the curvature.
+- **Planned response, as written in D49 ("If it fails") and done in D53:** first look where the divergent draws sit, then raise `target_accept` (0.95 to 0.99), which makes the steps smaller. The rule of no divergences is kept as written.
+- **Where the divergences sit (2026-10-23):** spread over all four chains (1, 2, 1 and 3), and the divergent draws have nearly the same values as the others (for example `ceff` 97.8 against 97.7, `cold_t_shutdown` -8.9 against -8.8); only a slight lean towards lower LMA and higher `c_lf` and `f_fol`. No chain and no extreme corner of one parameter stands out, so this is the case of steps slightly too large in a curved region, which a higher `target_accept` addresses; reparameterising (D27) is not indicated. These values were read only to locate the divergences, not as results.
+
 ## Part 5. Open items
 
 ### Still open
@@ -954,7 +1016,7 @@ Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily m
 
 **OPEN-7. Choice of sampler.** NUTS as the only sampler is carried over from the previous repository. Its settings are now fixed (D49); a dense mass matrix is being tested (D52); other alternatives are not yet re-assessed. Decide after the fake-data run: if it is too slow on the author's machine, the options are running on Roihu, or nutpie (another NUTS implementation that PyMC can call, often faster and with better warm-up, `nuts_sampler="nutpie"`).
 
-**OPEN-8. How to respond to F17 (real NEE pulls the parameters out of the believable region).** Options, all already recorded as planned changes, none tuned to the result: (a) add model error to sigma (L1 option C, Gelman et al. 2020, Sections 7.1 and 10.5), so the likelihood stops treating DALEC2 as able to match each day within RANDUNC; (b) the frost switch (D24), aimed at the spring misfit; (c) both; (d) a Laplace error (L2). Plan: quick fits of (a), (b) and (c) first, each judged with `diagnose_chains.py` (are the chains believable and do they agree?). **Status 2026-10-16 (F18):** (a) removes the separate modes and is now the main error model (L1, changed 2026-10-16); (b) alone does nothing. The remaining implausible canopy leaves three routes (Gelman et al. 2020, Sections 5.2, 6.1, 7): tolerate and report it; simplify (fix the canopy parameters at site values); or expand (a cold limit on photosynthesis, Stettz et al. 2022). To discuss with the supervisor. Gelman et al. (2020, Section 5.9) warn against "haphazardly tweaking the model until computational problems disappear", so every option must have its own reason, and all results are reported, not only the one that works.
+**OPEN-8. How to respond to F17 (real NEE pulls the parameters out of the believable region).** Options, all already recorded as planned changes, none tuned to the result: (a) add model error to sigma (L1 option C, Gelman et al. 2020, Sections 7.1 and 10.5), so the likelihood stops treating DALEC2 as able to match each day within RANDUNC; (b) the frost switch (D24), aimed at the spring misfit; (c) both; (d) a Laplace error (L2). Plan: quick fits of (a), (b) and (c) first, each judged with `diagnose_chains.py` (are the chains believable and do they agree?). **Status 2026-10-16 (F18):** (a) removes the separate modes and is now the main error model (L1, changed 2026-10-16); (b) alone does nothing. The remaining implausible canopy leaves three routes (Gelman et al. 2020, Sections 5.2, 6.1, 7): tolerate and report it; simplify (fix the canopy parameters at site values); or expand (a cold limit on photosynthesis, Stettz et al. 2022). To discuss with the supervisor. Gelman et al. (2020, Section 5.9) warn against "haphazardly tweaking the model until computational problems disappear", so every option must have its own reason, and all results are reported, not only the one that works. **Status 2026-10-23:** the main model is not fitted again and the cold-limit model is the base (D62); the simplify route is now the ladder of reduced cold models (D63).
 
 ### Planned sensitivity runs (decided in principle, to run after the main fit)
 

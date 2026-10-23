@@ -26,6 +26,7 @@ Sensitivity runs (planned runs table, Part 5) use the same script:
     --free-a7                                 ACM light-use efficiency estimated, a diagnostic (D58)
     --observation-model randunc_plus_model_error   model error added to sigma (L1)
     --mass-matrix dense                       sampler setting only (D52)
+    --fix-set MB                              a reduced model from config fix_sets (D63)
 
 Saves (the label is "fit" plus one tag per option, e.g. fit_frost):
     results/<label>.nc                 all posterior draws (not tracked by git)
@@ -56,7 +57,7 @@ from dalec.posterior import (
     check_can_save, computation_checks, interval_figure, parameter_table,
     possible_draws, posterior_parameters, print_table_and_health, sampler_health, search_prior,
 )
-from dalec.priors import prior_median, priors_for, priors_to_text
+from dalec.priors import fixed_values, prior_median, priors_for, priors_to_text
 
 SEASONS = {"DJF": (12, 1, 2), "MAM": (3, 4, 5), "JJA": (6, 7, 8), "SON": (9, 10, 11)}
 
@@ -234,6 +235,8 @@ def main() -> None:
                              "e.g. --fix lma,c_lf")
     parser.add_argument("--target-accept", type=float, default=None,
                         help="override sampler.target_accept (D53); higher = smaller, safer steps")
+    parser.add_argument("--fix-set", default=None,
+                        help="a reduced model from config fix_sets (D63), e.g. --fix-set MB")
     args = parser.parse_args()
 
     check_can_save()
@@ -254,6 +257,11 @@ def main() -> None:
     mm_tag = "" if args.mass_matrix is None else f"_{args.mass_matrix}"
     fixed = {name: prior_median(name, priors_for(args.cold)) for name in filter(None, args.fix.split(","))}
     fix_tag = ("_fix-" + "-".join(sorted(fixed))) if fixed else ""
+    if args.fix_set:                                       # D63: a named reduced model
+        if args.fix_set not in config["fix_sets"]:
+            raise SystemExit(f"--fix-set {args.fix_set}: not in config fix_sets {sorted(config['fix_sets'])}")
+        fixed.update(fixed_values(config["fix_sets"][args.fix_set], priors_for(args.cold)))
+        fix_tag += f"_{args.fix_set}"
     label = ("fit" + ("_model_error" if observation_model != "randunc_only" else "") + fix_tag
              + ("_frost" if frost_on else "") + ("_cold" if args.cold else "")
              + ("_a7" if args.free_a7 else "") + mm_tag + ta_tag
@@ -282,11 +290,11 @@ def main() -> None:
     if args.free_a7:
         print("  ACM light-use efficiency a7 sampled, not fixed (D58 diagnostic)")
     if fixed:
-        print("  held fixed at their prior medians (D54): "
-              + ", ".join(f"{k} = {v:.4g}" for k, v in fixed.items()))
+        print("  held fixed at their prior medians (D54, D63): " + ", ".join(
+            f"{k} = {np.round(v, 4).tolist() if np.ndim(v) else f'{v:.4g}'}" for k, v in fixed.items()))
     _, raw, _, checks = search_prior(drivers, years, latitude, frost, seed=int(fit["seed"]),
                                      n_candidates=int(fit["n_candidates"]), batch_size=batch_size,
-                                     cold=args.cold, free_a7=args.free_a7)
+                                     cold=args.cold, free_a7=args.free_a7, fixed=fixed)
     starts = possible_draws(checks, int(settings["chains"]))
     print(f"  chain starts = prior draws {starts} (each passes Tier 1, D45)")
     model = build_model(drivers, observed, sigma, use, latitude_deg=latitude,

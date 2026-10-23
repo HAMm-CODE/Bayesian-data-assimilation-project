@@ -20,12 +20,14 @@ Run from the repository root:
     python scripts/04_fake_data_check.py --mass-matrix dense   # D52 speed test
     python scripts/04_fake_data_check.py --cold    # the cold-limit model (D55, D59): truth,
                                                    # fake NEE and fit all include the cold limit
+    python scripts/04_fake_data_check.py --cold --fix-set MB   # a reduced model (D63): the fixed
+                                                   # quantities are fixed in the truth and in the fit
 
 The quick run judges nothing; it only shows that every step works and prints
 a rough time estimate for the full run.
 
 Saves:
-    results/fake_data_check[_cold][_<mass matrix>][_taNN][_quick].nc   all posterior draws (not tracked by git)
+    results/fake_data_check[_cold][_<fix set>][_<mass matrix>][_taNN][_quick].nc   all posterior draws (not tracked by git)
     figures/fake_data_recovery[...].csv   one row per quantity: truth, prior, posterior
     (the sampler tags appear only when --mass-matrix or --target-accept is given)
     N  fig_N_fake_data_recovery[...]      prior range, posterior range and truth
@@ -36,13 +38,14 @@ import time
 from typing import Any
 
 import numpy as np
+from scipy import stats
 
 from dalec.config import load_config, resolve_path
 from dalec.data_io import MASK_USE, load_model_block
 from dalec.inference import MASS_MATRIX_INIT, build_model, initial_values, sample
 from dalec.model_numpy import Parameters, drivers_from_frame, run
 from dalec.plotting import apply_style, heading
-from dalec.priors import COLD_PRIORS, priors_for, priors_to_text
+from dalec.priors import COLD_PRIORS, fixed_values, priors_for, priors_to_text
 from dalec.posterior import (
     QUANTITIES, check_can_save, computation_checks, first_days, interval_figure,
     parameter_table, possible_draws, print_table_and_health, sampler_health, search_prior,
@@ -53,14 +56,14 @@ from dalec.posterior import (
 # 1 and 2: the true forest, the fake data and the starting points
 # ---------------------------------------------------------------------------
 
-def choose_truth_and_starts(drivers, years, latitude, frost, n_chains, config, cold=False):
+def choose_truth_and_starts(drivers, years, latitude, frost, n_chains, config, cold=False, fixed=None):
     """Search prior draws: the first fully plausible one is the truth (D48);
     the next ones that are physically possible are the chain starts (D45)."""
     fake = config["fake_data"]
     params, raw, summary, checks = search_prior(
         drivers, years, latitude, frost, seed=int(fake["seed"]),
         n_candidates=int(fake["n_candidates"]),
-        batch_size=int(config["prior_predictive"]["batch_size"]), cold=cold)
+        batch_size=int(config["prior_predictive"]["batch_size"]), cold=cold, fixed=fixed)
     plausible = np.flatnonzero(checks["tier2_all"])
     possible = np.flatnonzero(~checks["tier1_fail"])
     if plausible.size == 0:
@@ -84,6 +87,15 @@ def choose_truth_and_starts(drivers, years, latitude, frost, n_chains, config, c
 # 4: judging the fit
 # ---------------------------------------------------------------------------
 
+def allowed_misses(k: int, p_miss: float, tail: float) -> int:
+    """Smallest m with P(more than m of k truths outside the interval) <= tail, when each
+    truth falls outside with probability p_miss (D63). 4 for k = 22 to 26, 3 for k = 14."""
+    m = 0
+    while stats.binom.sf(m, k, p_miss) > tail:
+        m += 1
+    return m
+
+
 def report(table, health, config: dict[str, Any], judged: bool) -> None:
     print_table_and_health(table, health, heading,
                            "Recovery of the true values (prior scale: log, logit or plain, D32)")
@@ -93,15 +105,21 @@ def report(table, health, config: dict[str, Any], judged: bool) -> None:
     fake = config["fake_data"]
     heading("D49 criteria, fixed before running")
     checks = computation_checks(table, health, config["diagnostics"])
-    # D49 allows 4 misses among the 24 main quantities (20 of 24); the cold model
-    # adds two thresholds and keeps the same allowance of misses (22 of 26, D59).
-    required = len(table) - (24 - int(fake["min_covered"]))
+    # Only the sampled quantities count; quantities held fixed (D63) are left out.
+    # Misses allowed (D63): the smallest m with P(more than m misses) <= miss_tail for k
+    # quantities at the 90% interval. This gives 4 for 22 to 26 quantities, the same as
+    # D49 (20 of 24) and D59 (22 of 26), and 3 for the 14 of M0.
+    free = table[table["narrowing"] != "fixed"]
+    k = len(free)
+    allowed = allowed_misses(k, 1.0 - float(fake["interval"]), float(fake["miss_tail"]))
+    required = k - allowed
+    inside = int(free["truth_inside"].sum())
     checks[f"truth inside the {fake['interval']:.0%} interval for at least "
-           f"{required} of {len(table)}"] = int(table["truth_inside"].sum()) >= required
+           f"{required} of {k}"] = inside >= required
     for text, ok in checks.items():
         print(f"  {'PASS' if ok else 'FAIL'}  {text}")
-    print(f"  truth inside for {int(table['truth_inside'].sum())} of {len(table)}; "
-          f"outside: {', '.join(table.index[~table['truth_inside']]) or 'none'}")
+    print(f"  truth inside for {inside} of {k}; "
+          f"outside: {', '.join(free.index[~free['truth_inside'].astype(bool)]) or 'none'}")
     print(f"\n  OVERALL: {'PASS' if all(checks.values()) else 'FAIL'}")
 
 
@@ -117,6 +135,8 @@ def main() -> None:
                         help="override sampler.target_accept (D53); higher = smaller, safer steps")
     parser.add_argument("--cold", action="store_true",
                         help="check the cold-limit model (D55, D59)")
+    parser.add_argument("--fix-set", default=None,
+                        help="a reduced model from config fix_sets (D63), e.g. --fix-set MB")
     args = parser.parse_args()
 
     check_can_save()
@@ -132,7 +152,13 @@ def main() -> None:
     # command line; the config defaults (D53) carry none.
     ta_tag = "" if args.target_accept is None else f"_ta{round(100 * float(settings['target_accept']))}"
     mm_tag = "" if args.mass_matrix is None else f"_{args.mass_matrix}"
-    suffix = ("_cold" if args.cold else "") + mm_tag + ta_tag + ("_quick" if args.quick else "")
+    fixed = None
+    if args.fix_set:                                       # D63: a named reduced model
+        if args.fix_set not in config["fix_sets"]:
+            raise SystemExit(f"--fix-set {args.fix_set}: not in config fix_sets {sorted(config['fix_sets'])}")
+        fixed = fixed_values(config["fix_sets"][args.fix_set], priors_for(args.cold))
+    suffix = (("_cold" if args.cold else "") + (f"_{args.fix_set}" if args.fix_set else "")
+              + mm_tag + ta_tag + ("_quick" if args.quick else ""))
 
     data = load_model_block(config, block="calibration")
     drivers = drivers_from_frame(data, config)
@@ -145,7 +171,9 @@ def main() -> None:
 
     heading("1. The true forest and the chain starts (D48, D45)")
     params, raw, truth, starts = choose_truth_and_starts(
-        drivers, years, latitude, frost, int(settings["chains"]), config, cold=args.cold)
+        drivers, years, latitude, frost, int(settings["chains"]), config, cold=args.cold, fixed=fixed)
+    if fixed:
+        print("  held fixed in the truth and in the fit (D63): " + ", ".join(sorted(fixed)))
 
     heading("2. Fake NEE: the true forest plus noise of the real size, on the real assimilable days")
     true_params = Parameters(**{k: v[truth] for k, v in params.as_arrays().items()})
@@ -166,7 +194,7 @@ def main() -> None:
         print("  note: the fake data have RANDUNC noise only, so the main observation model is used")
     model = build_model(drivers, fake_nee[:n_days], sigma[:n_days], use[:n_days],
                         latitude_deg=latitude, frost_threshold_degc=frost,
-                        observation_model="randunc_only", cold_limit=args.cold)
+                        observation_model="randunc_only", cold_limit=args.cold, fixed=fixed)
     print(f"  {settings['chains']} chains x ({settings['tune']} warm-up + {settings['draws']} kept), "
           f"target_accept {settings['target_accept']}, mass matrix {mass_matrix}")
     began = time.perf_counter()

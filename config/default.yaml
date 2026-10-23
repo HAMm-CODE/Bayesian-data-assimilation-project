@@ -78,7 +78,18 @@ fake_data:                     # fake-data check, DECISIONS.md D48 and D49
   seed: 20261015
   n_candidates: 200            # prior draws searched for the true forest and the chain starts
   interval: 0.90               # posterior interval used for the "truth recovered" check
-  min_covered: 20              # of the 24 sampled quantities, truth inside the interval
+  min_covered: 20              # of the 24 sampled quantities, truth inside the interval (D49)
+  miss_tail: 0.12              # D63: misses allowed = smallest m with P(more than m misses) <= this,
+                               #   for k free quantities at the 90% interval (4 for 22 to 26, 3 for 14)
+
+fix_sets:                      # reduced cold models, DECISIONS.md D63; held at prior medians
+  # chosen from the cold model's fake-data check (F26): posterior width / prior width
+  MA: [c_woo_0]                                          # least informed (0.87)
+  MB: [c_woo_0, c_som_0]                                 # + soil starting pool (0.75)
+  MC: [c_woo_0, c_som_0, theta_som, theta_woo]           # + soil and wood turnover (0.75)
+  M0: [c_woo_0, c_som_0, theta_som, theta_woo, shares, h, cr_onset, lma, f_auto]
+                                                         # everything not strongly informed (< 0.5);
+                                                         # "shares" = the four growth shares together
 
 fit:                           # real-data fit, DECISIONS.md D51
   seed: 20261016               # chain starts (a different set of prior draws from the fake-data check)

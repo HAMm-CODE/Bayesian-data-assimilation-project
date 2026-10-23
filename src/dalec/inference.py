@@ -22,6 +22,7 @@ import pytensor.tensor as pt
 from dalec.model import build_forward
 from dalec.model_numpy import Drivers
 from dalec.priors import (
+    SHARES_KEY,
     ACM_PRIORS, C_LF_RANGE, COLD_PRIORS, DIRICHLET_ALPHA, EDC_EQF, PRIORS, priors_for,
 )
 
@@ -81,9 +82,9 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
     """
     priors = priors_for(cold_limit)
     fixed = dict(fixed or {})
-    unknown = set(fixed) - set(priors)
+    unknown = set(fixed) - set(priors) - {SHARES_KEY}
     if unknown:
-        raise ValueError(f"only parameters with a prior can be fixed; unknown: {sorted(unknown)}")
+        raise ValueError(f"only parameters with a prior (or 'shares') can be fixed; unknown: {sorted(unknown)}")
     n = drivers.n_days
     observed_nee = np.asarray(observed_nee, dtype=float)
     sigma = np.asarray(sigma, dtype=float)
@@ -106,7 +107,11 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
         rv = {name: (pm.Deterministic(name, pt.as_tensor_variable(np.float64(fixed[name])))
                      if name in fixed else _prior_variable(name, spec))
               for name, spec in priors.items()}
-        shares = pm.Dirichlet("shares", a=np.array(list(DIRICHLET_ALPHA.values())))
+        if SHARES_KEY in fixed:                                 # D63: all four shares together
+            shares = pm.Deterministic(SHARES_KEY, pt.as_tensor_variable(
+                np.asarray(fixed[SHARES_KEY], dtype=np.float64)))
+        else:
+            shares = pm.Dirichlet("shares", a=np.array(list(DIRICHLET_ALPHA.values())))
 
         # Parameters the model needs that follow from the sampled ones.
         theta = {name: value for name, value in rv.items() if name != "h"}

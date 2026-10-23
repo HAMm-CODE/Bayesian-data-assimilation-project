@@ -125,12 +125,59 @@ def _draw(kind: str, a: float, b: float, n: int, rng: np.random.Generator) -> np
     raise ValueError(f"unknown prior kind {kind!r}")
 
 
+SHARES_KEY = "shares"   # in a fixed set (D63): the four growth shares together, at their prior mean
+
+
+def shares_mean() -> np.ndarray:
+    """Prior mean of the four growth shares (shares of 1 - f_auto): alpha / sum(alpha)."""
+    alpha = np.array(list(DIRICHLET_ALPHA.values()), dtype=float)
+    return alpha / alpha.sum()
+
+
+def fixed_values(names, priors: dict[str, tuple] | None = None) -> dict[str, Any]:
+    """Values for quantities held fixed (D54, D63): each at its prior median; the four
+    growth shares (named "shares") together at their prior mean, because they must sum to 1."""
+    priors = PRIORS if priors is None else priors
+    out: dict[str, Any] = {}
+    for name in names:
+        if name == SHARES_KEY:
+            out[name] = shares_mean()
+        elif name in priors:
+            out[name] = prior_median(name, priors)
+        else:
+            raise ValueError(f"{name!r} cannot be fixed: it has no prior (use 'shares' for the growth shares)")
+    return out
+
+
+def apply_fixed(raw: dict[str, np.ndarray], fixed: dict[str, Any]) -> tuple[Parameters, dict[str, np.ndarray]]:
+    """Overwrite prior draws with fixed values (D63) and rebuild the model Parameters.
+    The four growth shares follow f_auto (fixed or not) times the fixed share vector."""
+    raw = {k: np.array(v, dtype=float, copy=True) for k, v in raw.items()}
+    n = raw["f_auto"].shape[0]
+    for name, value in fixed.items():
+        if name != SHARES_KEY:
+            raw[name] = np.full(n, float(value))
+    growth = 1.0 - raw["f_auto"]
+    if SHARES_KEY in fixed:
+        shares = np.broadcast_to(np.asarray(fixed[SHARES_KEY], dtype=float), (n, len(DIRICHLET_ALPHA)))
+    else:   # keep each draw's own shares, but on the (possibly fixed) f_auto
+        old_growth = np.sum([raw[name] for name in DIRICHLET_ALPHA], axis=0)
+        shares = np.stack([raw[name] / old_growth for name in DIRICHLET_ALPHA], axis=1)
+    for k, name in enumerate(DIRICHLET_ALPHA):
+        raw[name] = growth * shares[:, k]
+    raw["theta_min"] = raw["theta_lit"] * raw["h"] / (1.0 - raw["h"])
+    return Parameters(**{k: v for k, v in raw.items() if k in Parameters.__dataclass_fields__}), raw
+
+
 def sample_prior(n: int, rng: np.random.Generator,
-                 priors: dict[str, tuple] | None = None) -> tuple[Parameters, dict[str, np.ndarray]]:
+                 priors: dict[str, tuple] | None = None,
+                 fixed: dict[str, Any] | None = None) -> tuple[Parameters, dict[str, np.ndarray]]:
     """Draw n parameter sets from the priors (`PRIORS`, or another list from `priors_for`).
 
     Returns the Parameters for the model and a dict of every sampled quantity
-    (including h and the four Dirichlet shares), for diagnostics.
+    (including h and the four Dirichlet shares), for diagnostics. With `fixed`
+    (from `fixed_values`), those quantities are held at their fixed values (D63);
+    the random draws are made first, so the other quantities do not change.
     """
     priors = PRIORS if priors is None else priors
     raw = {name: _draw(*spec, n, rng) for name, spec in priors.items()}
@@ -151,6 +198,8 @@ def sample_prior(n: int, rng: np.random.Generator,
     # theta_min from the share h (D35): h = theta_min / (theta_lit + theta_min)
     raw["theta_min"] = raw["theta_lit"] * raw["h"] / (1.0 - raw["h"])
 
+    if fixed:
+        return apply_fixed(raw, fixed)
     model_fields: dict[str, Any] = {k: v for k, v in raw.items() if k != "h"}
     return Parameters(**model_fields), raw
 

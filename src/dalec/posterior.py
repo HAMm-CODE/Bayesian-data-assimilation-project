@@ -50,17 +50,20 @@ def first_days(drivers: Drivers, n: int) -> Drivers:
 
 
 def search_prior(drivers, years, latitude, frost, *, seed: int, n_candidates: int,
-                 batch_size: int, cold: bool = False, free_a7: bool = False):
+                 batch_size: int, cold: bool = False, free_a7: bool = False,
+                 fixed: dict[str, Any] | None = None):
     """Draw prior parameter sets, run each over the block, and apply the D40 checks.
 
     Returns (params, raw, summary, checks). Callers pick from these: physically
     possible draws (Tier 1 passed) as chain starts (D45), and for the fake-data
     check, a fully plausible draw as the truth (D48). With `cold`, the draws come
     from the cold model's priors and include the two thresholds (D55, D57); with
-    `free_a7`, they include the ACM light-use efficiency (D58).
+    `free_a7`, they include the ACM light-use efficiency (D58). With `fixed`
+    (a reduced model, D63), those quantities are held at their fixed values, so
+    starts and truth are draws of the reduced model.
     """
     rng = np.random.default_rng(seed)
-    params, raw = sample_prior(n_candidates, rng, priors_for(cold))
+    params, raw = sample_prior(n_candidates, rng, priors_for(cold), fixed=fixed)
     thresholds = None
     if cold:
         raw.update(sample_cold(n_candidates, rng))
