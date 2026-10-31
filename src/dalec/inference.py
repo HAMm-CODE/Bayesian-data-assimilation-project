@@ -22,12 +22,12 @@ import pytensor.tensor as pt
 from dalec.model import build_forward
 from dalec.model_numpy import Drivers
 from dalec.priors import (
-    SHARES_KEY,
-    ACM_PRIORS, C_LF_RANGE, COLD_PRIORS, DIRICHLET_ALPHA, EDC_EQF, PRIORS, priors_for,
+    ACM_PRIORS, C_LF_RANGE, COLD_PRIORS, EDC_EQF, FRACTIONS, PRIORS, SHARE_NAMES, priors_for,
+    shares_from_fractions,
 )
 
 OBSERVATION_MODELS = ("randunc_only", "randunc_plus_model_error")   # L1: main, sensitivity
-SHARES = tuple(DIRICHLET_ALPHA)   # f_lab, f_fol, f_roo, f_woo
+SHARES = SHARE_NAMES   # f_lab, f_fol, f_roo, f_woo: shares of GPP, built from FRACTIONS (D67)
 
 
 def _prior_variable(name: str, spec: tuple) -> Any:
@@ -61,7 +61,8 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
                 edc_eqf: float = EDC_EQF,
                 fixed: dict[str, float] | None = None,
                 cold_limit: bool = False,
-                free_a7: bool = False) -> pm.Model:
+                free_a7: bool = False,
+                prior_set: str | None = None) -> pm.Model:
     """Build the PyMC model for one block of days.
 
     `observed_nee`, `sigma` (RANDUNC) and `assimilable` (the D12 mask) have one
@@ -79,12 +80,15 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
 
     `free_a7` samples the ACM's maximum canopy light-use efficiency (`acm_a7`,
     prior in ACM_PRIORS) instead of keeping the fixed DALEC2 value (D58 diagnostic).
+
+    `prior_set` uses the priors of a named prior set (D64, `priors.PRIOR_SETS`),
+    for example "lit" for the literature priors; None keeps the site priors.
     """
-    priors = priors_for(cold_limit)
+    priors = priors_for(cold_limit, prior_set)
     fixed = dict(fixed or {})
-    unknown = set(fixed) - set(priors) - {SHARES_KEY}
+    unknown = set(fixed) - set(priors)
     if unknown:
-        raise ValueError(f"only parameters with a prior (or 'shares') can be fixed; unknown: {sorted(unknown)}")
+        raise ValueError(f"only parameters with a prior can be fixed; unknown: {sorted(unknown)}")
     n = drivers.n_days
     observed_nee = np.asarray(observed_nee, dtype=float)
     sigma = np.asarray(sigma, dtype=float)
@@ -107,19 +111,12 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
         rv = {name: (pm.Deterministic(name, pt.as_tensor_variable(np.float64(fixed[name])))
                      if name in fixed else _prior_variable(name, spec))
               for name, spec in priors.items()}
-        if SHARES_KEY in fixed:                                 # D63: all four shares together
-            shares = pm.Deterministic(SHARES_KEY, pt.as_tensor_variable(
-                np.asarray(fixed[SHARES_KEY], dtype=np.float64)))
-        else:
-            shares = pm.Dirichlet("shares", a=np.array(list(DIRICHLET_ALPHA.values())))
 
-        # Parameters the model needs that follow from the sampled ones.
-        theta = {name: value for name, value in rv.items() if name != "h"}
-        growth = 1.0 - rv["f_auto"]
-        for k, name in enumerate(SHARES):                       # D28
-            theta[name] = pm.Deterministic(name, growth * shares[k])
-        theta["theta_min"] = pm.Deterministic(                  # D35
-            "theta_min", rv["theta_lit"] * rv["h"] / (1.0 - rv["h"]))
+        # The four shares of GPP, built step by step from the fractions (D28, D67).
+        theta = {name: value for name, value in rv.items() if name not in FRACTIONS}
+        shares = shares_from_fractions(*(rv[k] for k in ("f_auto", *FRACTIONS)))
+        for name in SHARES:
+            theta[name] = pm.Deterministic(name, shares[name])
 
         cold = None
         if cold_limit:
@@ -152,12 +149,10 @@ def build_model(drivers: Drivers, observed_nee: np.ndarray, sigma: np.ndarray,
 def initial_values(raw: dict[str, np.ndarray], i: int) -> dict[str, Any]:
     """Starting point for one chain from prior draw number `i` of `priors.sample_prior` (D45).
 
-    The four allocation values in `raw` are shares of GPP; the model samples them
-    as shares of growth (1 - f_auto), so they are divided back here.
+    The model samples the allocation as f_auto and three step fractions (D67), which
+    `raw` holds directly.
     """
     start = {name: float(raw[name][i]) for name in PRIORS}
-    growth = 1.0 - start["f_auto"]
-    start["shares"] = np.array([raw[name][i] / growth for name in SHARES])
     for name, (low, high, _, _) in COLD_PRIORS.items():   # cold model (D55): sampled as fractions
         if name in raw:
             start[f"{name}_fraction"] = (float(raw[name][i]) - low) / (high - low)

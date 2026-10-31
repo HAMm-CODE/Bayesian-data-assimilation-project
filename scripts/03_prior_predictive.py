@@ -11,6 +11,7 @@ Run from the repository root:
     python scripts/03_prior_predictive.py          main model (DALEC2)
     python scripts/03_prior_predictive.py --cold   cold-limit model (D55) with its priors (D57)
     python scripts/03_prior_predictive.py --cold --free-a7   ... with the ACM light-use efficiency sampled (D58)
+    python scripts/03_prior_predictive.py --cold --prior-set lit   ... with the literature priors (D64)
 
 Makes two figures (names end in _cold, or _cold_a7, for the other model versions):
     L  fig_L_prior_predictive_nee      NEE through the year: prior range vs observed (context)
@@ -36,7 +37,7 @@ from dalec.plotting import (
     apply_style, climatology, day_of_year_365, heading, save_figure, set_year_axis,
 )
 from dalec.priors import (
-    ACM_PRIORS, COLD_MODEL_PRIOR_CHANGES, COLD_PRIORS, PRIORS, edc_log_weight, priors_for,
+    ACM_PRIORS, COLD_MODEL_PRIOR_CHANGES, COLD_PRIORS, PRIOR_SETS, PRIORS, edc_log_weight, priors_for,
     sample_acm, sample_cold, sample_prior, to_prior_scale,
 )
 
@@ -81,8 +82,6 @@ def drivers_of_failure(raw: dict[str, np.ndarray], failed: np.ndarray, label: st
         return {}
     links = {}
     for name, values in raw.items():
-        if name == "theta_min":      # follows from theta_lit and h
-            continue
         x = to_prior_scale(name, values)
         links[name] = float((x[failed].mean() - x[~failed].mean()) / x.std())
     print(f"\n  All sampled quantities, linked to '{label}' (failing minus passing):")
@@ -204,9 +203,13 @@ def main() -> None:
                         help="cold-limit model (D55) with its own priors (D57)")
     parser.add_argument("--free-a7", action="store_true",
                         help="with --cold: sample the ACM light-use efficiency a7 (D58 diagnostic)")
+    parser.add_argument("--prior-set", choices=tuple(PRIOR_SETS), default=None,
+                        help="with --cold: use a named prior set (D64), e.g. lit")
     args = parser.parse_args()
     if args.free_a7 and not args.cold:
         parser.error("--free-a7 is a diagnostic of the cold-limit model; use it with --cold")
+    if args.prior_set not in (None, "site") and not args.cold:
+        parser.error("--prior-set is used with the cold-limit model (D64); add --cold")
 
     config = load_config()
     apply_style()
@@ -224,7 +227,7 @@ def main() -> None:
     rng = np.random.default_rng(int(settings["seed"]))
     if args.cold:
         cold_model(drivers, years, weights, latitude, batch_size, observed, settings, config, rng,
-                   free_a7=args.free_a7)
+                   free_a7=args.free_a7, prior_set=args.prior_set)
         return
     params, raw = sample_prior(int(settings["n_draws"]), rng)
 
@@ -264,7 +267,7 @@ COLD_MODEL_TIER1_LIMIT = 0.07
 
 
 def cold_model(drivers, years, weights, latitude, batch_size, observed, settings, config, rng,
-               free_a7: bool = False) -> None:
+               free_a7: bool = False, prior_set: str | None = None) -> None:
     """Prior predictive check of the cold-limit model (D55), with its priors (D57)
     and, with `free_a7`, the ACM light-use efficiency sampled (D58).
 
@@ -273,7 +276,8 @@ def cold_model(drivers, years, weights, latitude, batch_size, observed, settings
     position within the main model's prior (only if the cold model changes `ceff`, D57).
     """
     n = int(settings["n_draws"])
-    priors = priors_for(cold=True)
+    priors = priors_for(cold=True, prior_set=prior_set)
+    literature = prior_set not in (None, "site")
     params, raw = sample_prior(n, rng, priors)
     raw.update(sample_cold(n, rng))
     thresholds = tuple(raw[name] for name in COLD_PRIORS)
@@ -281,9 +285,11 @@ def cold_model(drivers, years, weights, latitude, batch_size, observed, settings
     if free_a7:
         raw.update(sample_acm(n, rng))
         a7 = raw["acm_a7"]
-    suffix = "_cold" + ("_a7" if free_a7 else "")
-    decision = "D58" if free_a7 else "D57"
+    suffix = "_cold" + (f"_{prior_set}" if literature else "") + ("_a7" if free_a7 else "")
+    decision = "D58" if free_a7 else ("D64" if literature else "D57")
     changes = [f"{k} {v}" for k, v in COLD_MODEL_PRIOR_CHANGES.items()]
+    if literature:
+        changes += [f"{k} {v}" for k, v in (PRIOR_SETS[prior_set] or {}).items()]
     if free_a7:
         changes.append(f"acm_a7 sampled {ACM_PRIORS['acm_a7']}")
     changed = "; ".join(changes) if changes else "none"
@@ -342,7 +348,10 @@ def cold_model(drivers, years, weights, latitude, batch_size, observed, settings
         line += f"; {comparison[0]}: Tier 1 {t1_old:.1%}, Tier 2 {t2_old:.1%}"
     print(line + ")")
     verdict = all(rule.values())
-    if free_a7:
+    if literature:
+        outcome = ("reported only, not a gate (D64): the literature priors are used as they are "
+                   f"({'within' if verdict else 'outside'} the D57 numbers); whether the fits run is D65")
+    elif free_a7:
         outcome = ("the priors are sound: go on to the quick fit (D58)" if verdict else
                    "the a7 prior gives implausible forests: do not fit; revisit the a7 prior (D58)")
     else:

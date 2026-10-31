@@ -71,9 +71,10 @@ RANK_PER_PAGE = 12
 LABELS = {
     "f_auto": r"$f_\mathrm{auto}$", "f_lab": r"$f_\mathrm{lab}$", "f_fol": r"$f_\mathrm{fol}$",
     "f_roo": r"$f_\mathrm{roo}$", "f_woo": r"$f_\mathrm{woo}$",
+    "frac_fol": r"$s_\mathrm{fol}$", "frac_lab": r"$s_\mathrm{lab}$", "frac_roo": r"$s_\mathrm{roo}$",
     "theta_roo": r"$\theta_\mathrm{roo}$ (d$^{-1}$)", "theta_woo": r"$\theta_\mathrm{woo}$ (d$^{-1}$)",
     "theta_lit": r"$\theta_\mathrm{lit}$ (d$^{-1}$)", "theta_som": r"$\theta_\mathrm{som}$ (d$^{-1}$)",
-    "h": r"$h$ (litter to soil share)", "temperature_exponent": r"$\Theta$ (K$^{-1}$)",
+    "theta_min": r"$\theta_{\mathrm{min}}$ (d$^{-1}$)", "temperature_exponent": r"$\Theta$ (K$^{-1}$)",
     "d_onset": r"$d_\mathrm{onset}$ (day)", "cr_onset": r"$cr_\mathrm{onset}$ (d)",
     "d_fall": r"$d_\mathrm{fall}$ (day)", "cr_fall": r"$cr_\mathrm{fall}$ (d)",
     "c_lf": r"$c_\mathrm{lf}$ (yr$^{-1}$)", "lma": r"LMA (g C m$^{-2}$)", "ceff": r"$c_\mathrm{eff}$",
@@ -83,7 +84,7 @@ LABELS = {
     "acm_a7": r"$a_7$ (ACM light-use efficiency)", "sigma_m": r"$\sigma_m$ (" + UNIT_FLUX + ")",
 }
 # Where the long label does not fit (small panels)
-SHORT_LABELS = {"h": r"$h$", "acm_a7": r"$a_7$", "sigma_m": r"$\sigma_m$"}
+SHORT_LABELS = {"theta_min": r"$\theta_{\mathrm{min}}$", "acm_a7": r"$a_7$", "sigma_m": r"$\sigma_m$"}
 POOL_LABELS = {"c_lab": "labile", "c_fol": "foliage", "c_roo": "roots",
                "c_woo": "wood", "c_lit": "litter", "c_som": "soil organic matter"}
 

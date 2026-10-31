@@ -87,9 +87,9 @@ fix_sets:                      # reduced cold models, DECISIONS.md D63; held at 
   MA: [c_woo_0]                                          # least informed (0.87)
   MB: [c_woo_0, c_som_0]                                 # + soil starting pool (0.75)
   MC: [c_woo_0, c_som_0, theta_som, theta_woo]           # + soil and wood turnover (0.75)
-  M0: [c_woo_0, c_som_0, theta_som, theta_woo, shares, h, cr_onset, lma, f_auto]
+  M0: [c_woo_0, c_som_0, theta_som, theta_woo, frac_fol, frac_lab, frac_roo, theta_min, cr_onset, lma, f_auto]
                                                          # everything not strongly informed (< 0.5);
-                                                         # "shares" = the four growth shares together
+                                                         # frac_* = the three allocation steps (D67)
 
 fit:                           # real-data fit, DECISIONS.md D51
   seed: 20261016               # chain starts (a different set of prior draws from the fake-data check)

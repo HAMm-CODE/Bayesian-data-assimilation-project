@@ -30,15 +30,16 @@ def test_lognormal_medians_match_decisions(draws):
 def test_beta_and_normal_means_match_decisions(draws):
     _, raw = draws
     assert raw["f_auto"].mean() == pytest.approx(0.51, abs=0.005)
-    assert raw["h"].mean() == pytest.approx(0.20, abs=0.005)
     assert raw["d_onset"].mean() == pytest.approx(145, abs=0.5)
     assert raw["d_fall"].mean() == pytest.approx(265, abs=0.5)
 
 
-def test_theta_min_follows_from_h(draws):
-    _, raw = draws
-    h_back = raw["theta_min"] / (raw["theta_lit"] + raw["theta_min"])
-    assert np.allclose(h_back, raw["h"])
+def test_theta_min_prior_spans_the_published_range():
+    """D66: the 95% range of the theta_min prior is the published 1e-5 to 1e-2 d-1."""
+    from scipy import stats
+    _, median, sdlog = PRIORS["theta_min"]
+    low, high = stats.lognorm(s=sdlog, scale=median).ppf([0.025, 0.975])
+    assert low == pytest.approx(1e-5, rel=1e-3) and high == pytest.approx(1e-2, rel=1e-3)
 
 
 def test_c_lf_stays_inside_polynomial_range(draws):

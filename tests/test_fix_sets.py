@@ -1,5 +1,6 @@
-"""Reduced models (D63): named sets of quantities held fixed at their prior medians,
-with the four growth shares fixed together. Run with:  pytest"""
+"""Reduced models (D63): named sets of quantities held fixed at their prior medians.
+The allocation is f_auto and three step fractions (D67), each fixed on its own.
+Run with:  pytest"""
 
 import numpy as np
 import pytest
@@ -8,13 +9,13 @@ from scipy import stats
 from dalec.config import load_config
 from dalec.inference import SHARES, build_model
 from dalec.priors import (
-    DIRICHLET_ALPHA, SHARES_KEY, apply_fixed, fixed_values, prior_median, priors_for, sample_prior,
-    shares_mean,
+    FRACTIONS, apply_fixed, fixed_values, prior_median, priors_for, sample_prior, shares_from_fractions,
 )
 from test_inference import DRIVERS, LAT, fake_observations, hand_logp, model_logp, prior_logp
 from test_model_numpy import median_parameters
 
-M0 = ["c_woo_0", "c_som_0", "theta_som", "theta_woo", "shares", "h", "cr_onset", "lma", "f_auto"]
+M0 = ["c_woo_0", "c_som_0", "theta_som", "theta_woo", "frac_fol", "frac_lab", "frac_roo",
+      "theta_min", "cr_onset", "lma", "f_auto"]
 
 
 def test_config_fix_sets_are_valid_and_nested():
@@ -26,14 +27,14 @@ def test_config_fix_sets_are_valid_and_nested():
     assert sets["M0"] == M0
 
 
-def test_fixed_values_are_prior_medians_and_mean_shares():
+def test_fixed_values_are_prior_medians():
     priors = priors_for(cold=True)
-    values = fixed_values(["c_woo_0", "f_auto", SHARES_KEY], priors)
+    values = fixed_values(["c_woo_0", "f_auto", "frac_fol"], priors)
     assert values["c_woo_0"] == prior_median("c_woo_0", priors)
     assert values["f_auto"] == pytest.approx(stats.beta(25.5, 24.5).median())
-    assert np.allclose(values[SHARES_KEY], shares_mean()) and shares_mean().sum() == pytest.approx(1.0)
+    assert values["frac_fol"] == pytest.approx(stats.beta(13.06, 72.59).median())
     with pytest.raises(ValueError, match="cannot be fixed"):
-        fixed_values(["f_lab"], priors)                    # a single share cannot be fixed alone
+        fixed_values(["f_lab"], priors)                    # a share of GPP is built, not sampled
 
 
 def test_sample_prior_with_fixed_keeps_the_other_draws():
@@ -44,48 +45,45 @@ def test_sample_prior_with_fixed_keeps_the_other_draws():
     params, raw = sample_prior(50, np.random.default_rng(3), priors, fixed=fixed)
     for name in ("ceff", "c_lf", "d_onset", "c_fol_0", "theta_lit"):
         assert np.array_equal(raw[name], raw_free[name])
-    for name in ("c_woo_0", "lma", "f_auto", "h"):
+    for name in M0:
         assert np.all(raw[name] == fixed[name])
-    growth = 1.0 - raw["f_auto"]
-    for k, name in enumerate(SHARES):
-        assert np.allclose(raw[name], growth * shares_mean()[k])
+    expected = shares_from_fractions(*(fixed[k] for k in ("f_auto", *FRACTIONS)))
+    for name in SHARES:
+        assert np.allclose(raw[name], expected[name])
         assert np.allclose(getattr(params, name), raw[name])
-    assert np.allclose(raw["theta_min"], raw["theta_lit"] * raw["h"] / (1 - raw["h"]))
-    assert np.allclose(params.theta_min, raw["theta_min"])
+    assert np.allclose(params.theta_min, fixed["theta_min"])
 
 
-def test_fixing_f_auto_alone_keeps_each_draws_shares():
+def test_fixing_f_auto_alone_keeps_each_draws_fractions():
     priors = priors_for(cold=False)
     _, raw = sample_prior(20, np.random.default_rng(4), priors)
     _, fixed_raw = apply_fixed(raw, {"f_auto": 0.5})
-    old = np.stack([raw[n] for n in DIRICHLET_ALPHA], 1) / (1 - raw["f_auto"])[:, None]
-    new = np.stack([fixed_raw[n] for n in DIRICHLET_ALPHA], 1) / 0.5
-    assert np.allclose(old, new)
+    for name in FRACTIONS:
+        assert np.allclose(raw[name], fixed_raw[name])
+    total = sum(fixed_raw[n] for n in SHARES)
+    assert np.allclose(total, 0.5)
 
 
 def test_m0_log_posterior_equals_hand_computation_minus_fixed_priors():
     """D63: the reduced model's log density is the full one at the same point, minus the
-    priors of the fixed quantities and minus the Dirichlet term of the fixed shares."""
+    priors of the fixed quantities."""
     priors = priors_for(cold=True)
     fixed = fixed_values(M0, priors)
-    growth = 1.0 - fixed["f_auto"]
+    shares = shares_from_fractions(*(fixed[k] for k in ("f_auto", *FRACTIONS)))
     params = median_parameters(
         f_auto=fixed["f_auto"], lma=fixed["lma"], cr_onset=fixed["cr_onset"],
-        theta_som=fixed["theta_som"], theta_woo=fixed["theta_woo"],
-        c_woo_0=fixed["c_woo_0"], c_som_0=fixed["c_som_0"],
-        **{name: growth * fixed[SHARES_KEY][k] for k, name in enumerate(SHARES)})
+        theta_som=fixed["theta_som"], theta_woo=fixed["theta_woo"], theta_min=fixed["theta_min"],
+        c_woo_0=fixed["c_woo_0"], c_som_0=fixed["c_som_0"], **{k: float(v) for k, v in shares.items()})
     observed, sigma, use = fake_observations(params)
     model = build_model(DRIVERS, observed, sigma, use, latitude_deg=LAT,
                         observation_model="randunc_plus_model_error", cold_limit=True, fixed=fixed)
     free_names = {rv.name for rv in model.free_RVs}
     assert not free_names & set(M0)
-    assert SHARES_KEY not in free_names
     assert len(free_names) == 14 + 1                       # 14 quantities + sigma_m (D63)
 
-    full, point = hand_logp(params, fixed["h"], 0.4, observed, sigma, use,
+    full, point = hand_logp(params, 0.4, observed, sigma, use,
                             "randunc_plus_model_error", cold=(-6.0, 5.0))
-    removed = sum(prior_logp(name, fixed[name], priors) for name in M0 if name != SHARES_KEY)
-    removed += stats.dirichlet(list(DIRICHLET_ALPHA.values())).logpdf(fixed[SHARES_KEY])
+    removed = sum(prior_logp(name, fixed[name], priors) for name in M0)
     free_point = {k: v for k, v in point.items() if k in free_names}
     assert model_logp(model, free_point) == pytest.approx(full - removed, rel=1e-9)
 

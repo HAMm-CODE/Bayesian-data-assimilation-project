@@ -27,6 +27,7 @@ Sensitivity runs (planned runs table, Part 5) use the same script:
     --observation-model randunc_plus_model_error   model error added to sigma (L1)
     --mass-matrix dense                       sampler setting only (D52)
     --fix-set MB                              a reduced model from config fix_sets (D63)
+    --prior-set lit                           the literature priors (D64)
 
 Saves (the label is "fit" plus one tag per option, e.g. fit_frost):
     results/<label>.nc                 all posterior draws (not tracked by git)
@@ -57,7 +58,7 @@ from dalec.posterior import (
     check_can_save, computation_checks, interval_figure, parameter_table,
     possible_draws, posterior_parameters, print_table_and_health, sampler_health, search_prior,
 )
-from dalec.priors import fixed_values, prior_median, priors_for, priors_to_text
+from dalec.priors import PRIOR_SETS, fixed_values, prior_median, priors_for, priors_to_text
 
 SEASONS = {"DJF": (12, 1, 2), "MAM": (3, 4, 5), "JJA": (6, 7, 8), "SON": (9, 10, 11)}
 
@@ -237,12 +238,16 @@ def main() -> None:
                         help="override sampler.target_accept (D53); higher = smaller, safer steps")
     parser.add_argument("--fix-set", default=None,
                         help="a reduced model from config fix_sets (D63), e.g. --fix-set MB")
+    parser.add_argument("--prior-set", choices=tuple(PRIOR_SETS), default=None,
+                        help="use a named prior set (D64), e.g. --prior-set lit for the literature priors")
     args = parser.parse_args()
 
     check_can_save()
     config = load_config()
     apply_style()
     fit, settings, lik = config["fit"], dict(config["sampler"]), config["likelihood"]
+    priors = priors_for(args.cold, args.prior_set)
+    prior_tag = f"_{args.prior_set}" if args.prior_set not in (None, "site") else ""
     if args.quick:
         settings.update({k: v for k, v in settings["quick"].items() if k != "years"})
     observation_model = args.observation_model or lik["observation_model"]
@@ -255,15 +260,15 @@ def main() -> None:
     # command line; the config defaults (D53) carry none.
     ta_tag = "" if args.target_accept is None else f"_ta{round(100 * float(settings['target_accept']))}"
     mm_tag = "" if args.mass_matrix is None else f"_{args.mass_matrix}"
-    fixed = {name: prior_median(name, priors_for(args.cold)) for name in filter(None, args.fix.split(","))}
+    fixed = {name: prior_median(name, priors) for name in filter(None, args.fix.split(","))}
     fix_tag = ("_fix-" + "-".join(sorted(fixed))) if fixed else ""
     if args.fix_set:                                       # D63: a named reduced model
         if args.fix_set not in config["fix_sets"]:
             raise SystemExit(f"--fix-set {args.fix_set}: not in config fix_sets {sorted(config['fix_sets'])}")
-        fixed.update(fixed_values(config["fix_sets"][args.fix_set], priors_for(args.cold)))
+        fixed.update(fixed_values(config["fix_sets"][args.fix_set], priors))
         fix_tag += f"_{args.fix_set}"
     label = ("fit" + ("_model_error" if observation_model != "randunc_only" else "") + fix_tag
-             + ("_frost" if frost_on else "") + ("_cold" if args.cold else "")
+             + ("_frost" if frost_on else "") + ("_cold" if args.cold else "") + prior_tag
              + ("_a7" if args.free_a7 else "") + mm_tag + ta_tag
              + ("_quick" if args.quick else ""))
     interval = float(fit["interval"])
@@ -289,18 +294,22 @@ def main() -> None:
         print("  cold limit on photosynthesis on (D55): thresholds sampled")
     if args.free_a7:
         print("  ACM light-use efficiency a7 sampled, not fixed (D58 diagnostic)")
+    if prior_tag:
+        print(f"  prior set {args.prior_set!r} (D64): " + ", ".join(
+            f"{k} {v}" for k, v in (PRIOR_SETS[args.prior_set] or {}).items()))
     if fixed:
         print("  held fixed at their prior medians (D54, D63): " + ", ".join(
             f"{k} = {np.round(v, 4).tolist() if np.ndim(v) else f'{v:.4g}'}" for k, v in fixed.items()))
     _, raw, _, checks = search_prior(drivers, years, latitude, frost, seed=int(fit["seed"]),
                                      n_candidates=int(fit["n_candidates"]), batch_size=batch_size,
-                                     cold=args.cold, free_a7=args.free_a7, fixed=fixed)
+                                     cold=args.cold, free_a7=args.free_a7, fixed=fixed,
+                                     prior_set=args.prior_set)
     starts = possible_draws(checks, int(settings["chains"]))
     print(f"  chain starts = prior draws {starts} (each passes Tier 1, D45)")
     model = build_model(drivers, observed, sigma, use, latitude_deg=latitude,
                         frost_threshold_degc=frost, observation_model=observation_model,
                         model_error_prior_sd=float(lik["model_error_prior_sd"]), fixed=fixed,
-                        cold_limit=args.cold, free_a7=args.free_a7)
+                        cold_limit=args.cold, free_a7=args.free_a7, prior_set=args.prior_set)
     print(f"  {settings['chains']} chains x ({settings['tune']} warm-up + {settings['draws']} kept), "
           f"target_accept {settings['target_accept']}")
     began = time.perf_counter()
@@ -311,7 +320,7 @@ def main() -> None:
     elapsed = time.perf_counter() - began
     print(f"  sampling took {elapsed / 3600:.1f} h "
           f"({elapsed / (int(settings['tune']) + int(settings['draws'])):.2f} s per iteration per chain)")
-    idata.attrs["priors"] = priors_to_text(priors_for(args.cold))   # D57: which priors were used
+    idata.attrs["priors"] = priors_to_text(priors)   # D57, D64: which priors were used
     out_dir = resolve_path(config["paths"]["results"])
     out_dir.mkdir(parents=True, exist_ok=True)
     idata.to_netcdf(out_dir / f"{label}.nc")

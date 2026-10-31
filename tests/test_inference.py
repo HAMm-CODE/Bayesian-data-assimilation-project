@@ -8,7 +8,8 @@ from scipy import stats
 from dalec.inference import SHARES, build_model, initial_values
 from dalec.model_numpy import run
 from dalec.priors import (
-    ACM_PRIORS, C_LF_RANGE, COLD_PRIORS, DIRICHLET_ALPHA, PRIORS, edc_log_weight, log_prior, sample_prior,
+    ACM_PRIORS, C_LF_RANGE, COLD_PRIORS, FRACTIONS, PRIORS, edc_log_weight, fractions_from_shares,
+    log_prior, sample_prior,
     priors_for, steady_state_ratio,
 )
 from test_model_numpy import LAT, median_parameters, synthetic_drivers
@@ -38,18 +39,14 @@ def fake_observations(params, seed=1):
     return observed, sigma, use
 
 
-def hand_logp(params, h, sigma_m, observed, sigma, use, observation_model, cold=None, a7=None):
+def hand_logp(params, sigma_m, observed, sigma, use, observation_model, cold=None, a7=None):
     """Priors + D44 term + likelihood, computed with scipy and the numpy model.
     `cold` = (t_shutdown, t_full) adds the D55 cold limit, its two priors, and the
     cold model's prior list (D57)."""
-    values = {name: float(getattr(params, name)) for name in PRIORS if name != "h"}
-    values["h"] = h
-    growth = 1.0 - values["f_auto"]
-    shares = np.array([float(getattr(params, s)) / growth for s in SHARES])
-    # theta_min in the model follows from h; make the numpy run use the same value.
-    theta_min = values["theta_lit"] * h / (1 - h)
-    reference = run(type(params)(**{**params.as_arrays(), "theta_min": theta_min}),
-                    DRIVERS, latitude_deg=LAT, cold=cold, a7=a7)
+    values = {name: float(getattr(params, name)) for name in PRIORS if name not in FRACTIONS}
+    values.update({k: float(v) for k, v in fractions_from_shares(
+        params.f_auto, params.f_lab, params.f_fol, params.f_roo).items()})     # D67
+    reference = run(params, DRIVERS, latitude_deg=LAT, cold=cold, a7=a7)
 
     priors = priors_for(cold is not None)    # the cold model has its own ceff prior (D57)
     total = sum(prior_logp(name, value, priors) for name, value in values.items())
@@ -60,7 +57,6 @@ def hand_logp(params, h, sigma_m, observed, sigma, use, observation_model, cold=
     if a7 is not None:      # D58: log-normal prior on the ACM light-use efficiency
         _, median, sdlog = ACM_PRIORS["acm_a7"]
         total += stats.lognorm(s=sdlog, scale=median).logpdf(a7)
-    total += stats.dirichlet(list(DIRICHLET_ALPHA.values())).logpdf(shares)
     rs = steady_state_ratio(reference.pools_in["c_fol"], reference.pools_out["c_fol"],
                             reference.pools_yearly["c_fol"].mean(), reference.pools_start["c_fol"])
     total += -0.5 * (np.log(rs) / np.log(2.0)) ** 2
@@ -69,7 +65,7 @@ def hand_logp(params, h, sigma_m, observed, sigma, use, observation_model, cold=
         total += stats.halfnorm(scale=1.0).logpdf(sigma_m)
         sd = np.sqrt(sd**2 + sigma_m**2)
     total += stats.norm(reference.nee[use], sd).logpdf(observed[use]).sum()
-    point = {**values, "shares": shares, "sigma_m": sigma_m}
+    point = {**values, "sigma_m": sigma_m}
     if a7 is not None:
         point["acm_a7"] = a7
     if cold is not None:
@@ -98,11 +94,11 @@ def test_log_posterior_equals_hand_computation(observation_model):
     observed, sigma, use = fake_observations(median_parameters())
     model = build_model(DRIVERS, observed, sigma, use, latitude_deg=LAT,
                         observation_model=observation_model)
-    a_expected, a_point = hand_logp(median_parameters(), 0.2, 0.4, observed, sigma, use,
+    a_expected, a_point = hand_logp(median_parameters(), 0.4, observed, sigma, use,
                                     observation_model)
     other = median_parameters(ceff=12.0, lma=160.0, c_lf=0.3, temperature_exponent=0.04,
                               d_fall=255.0, c_som_0=6500.0)
-    b_expected, b_point = hand_logp(other, 0.25, 0.7, observed, sigma, use, observation_model)
+    b_expected, b_point = hand_logp(other, 0.7, observed, sigma, use, observation_model)
     a, b = model_logp(model, a_point), model_logp(model, b_point)
     assert a == pytest.approx(a_expected, rel=1e-9)
     assert b == pytest.approx(b_expected, rel=1e-9)
@@ -111,10 +107,12 @@ def test_log_posterior_equals_hand_computation(observation_model):
 def test_initial_values_round_trip():
     _, raw = sample_prior(5, np.random.default_rng(3))
     start = initial_values(raw, 2)
-    assert start["shares"].sum() == pytest.approx(1.0)
-    growth = 1 - start["f_auto"]
-    for k, name in enumerate(SHARES):
-        assert growth * start["shares"][k] == pytest.approx(raw[name][2])
+    for name in PRIORS:
+        assert start[name] == pytest.approx(raw[name][2])
+    back = fractions_from_shares(raw["f_auto"][2], raw["f_lab"][2], raw["f_fol"][2], raw["f_roo"][2])
+    for name in FRACTIONS:
+        assert back[name] == pytest.approx(start[name])
+    assert sum(raw[n][2] for n in SHARES) + raw["f_auto"][2] == pytest.approx(1.0)
 
 
 def test_rejects_assimilable_day_without_sigma():
@@ -129,14 +127,9 @@ def test_log_prior_plus_terms_equals_hand_computation():
     equals the independent hand computation of the full log posterior."""
     params = median_parameters()
     observed, sigma, use = fake_observations(params)
-    expected, point = hand_logp(params, 0.2, 0.0, observed, sigma, use, "randunc_only")
+    expected, point = hand_logp(params, 0.0, observed, sigma, use, "randunc_only")
     raw = {name: point[name] for name in PRIORS}
-    growth = 1.0 - point["f_auto"]
-    for k, name in enumerate(SHARES):
-        raw[name] = growth * point["shares"][k]
-    reference = run(type(params)(**{**params.as_arrays(),
-                                    "theta_min": point["theta_lit"] * 0.2 / 0.8}),
-                    DRIVERS, latitude_deg=LAT)
+    reference = run(params, DRIVERS, latitude_deg=LAT)
     rs = steady_state_ratio(reference.pools_in["c_fol"], reference.pools_out["c_fol"],
                             reference.pools_yearly["c_fol"].mean(), reference.pools_start["c_fol"])
     likelihood = stats.norm(reference.nee[use], sigma[use]).logpdf(observed[use]).sum()
@@ -151,7 +144,7 @@ def test_fixed_parameters_are_constants_and_drop_out_of_the_prior():
     observed, sigma, use = fake_observations(params)
     model = build_model(DRIVERS, observed, sigma, use, latitude_deg=LAT, fixed={"lma": 185.0})
     assert "lma" not in {rv.name for rv in model.free_RVs}
-    expected, point = hand_logp(params, 0.2, 0.0, observed, sigma, use, "randunc_only")
+    expected, point = hand_logp(params, 0.0, observed, sigma, use, "randunc_only")
     free = {k: v for k, v in point.items() if k != "lma"}
     assert model_logp(model, free) == pytest.approx(expected - prior_logp("lma", 185.0), rel=1e-9)
     with pytest.raises(ValueError, match="fixed"):
@@ -164,7 +157,7 @@ def test_cold_limit_model_equals_hand_computation():
     observed, sigma, use = fake_observations(median_parameters())
     model = build_model(DRIVERS, observed, sigma, use, latitude_deg=LAT,
                         observation_model="randunc_plus_model_error", cold_limit=True)
-    expected, point = hand_logp(median_parameters(), 0.2, 0.4, observed, sigma, use,
+    expected, point = hand_logp(median_parameters(), 0.4, observed, sigma, use,
                                 "randunc_plus_model_error", cold=(-6.0, 5.0))
     assert model_logp(model, point) == pytest.approx(expected, rel=1e-9)
 
@@ -189,6 +182,6 @@ def test_free_a7_model_equals_hand_computation():
     model = build_model(DRIVERS, observed, sigma, use, latitude_deg=LAT,
                         observation_model="randunc_plus_model_error", cold_limit=True, free_a7=True)
     assert "acm_a7" in {rv.name for rv in model.free_RVs}
-    expected, point = hand_logp(median_parameters(), 0.2, 0.4, observed, sigma, use,
+    expected, point = hand_logp(median_parameters(), 0.4, observed, sigma, use,
                                 "randunc_plus_model_error", cold=(-6.0, 5.0), a7=3.5)
     assert model_logp(model, point) == pytest.approx(expected, rel=1e-9)

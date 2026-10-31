@@ -13,17 +13,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from dalec.inference import SHARES
 from dalec.model_numpy import Drivers, Parameters
 from dalec.plausibility import evaluate, run_and_summarise
 from dalec.plotting import BLUE, GREY_LIGHT, INK_SOFT, ORANGE, save_figure
 from dalec.priors import (
-    ACM_PRIORS, COLD_PRIORS, priors_for, priors_from_attrs, sample_acm, sample_cold, sample_prior,
+    ACM_PRIORS, COLD_PRIORS, FRACTIONS, priors_for, priors_from_attrs, sample_acm, sample_cold, sample_prior,
     to_prior_scale,
 )
 
-# The 24 sampled quantities, in the order of the parameter groups (D34 to D39).
-QUANTITIES = ("f_auto", *SHARES, "theta_roo", "theta_woo", "theta_lit", "theta_som", "h",
+# The 23 sampled quantities of DALEC2, in the order of the parameter groups (D34 to D39);
+# the allocation is f_auto plus the three step fractions (D67). The cold model adds 2.
+QUANTITIES = ("f_auto", *FRACTIONS, "theta_roo", "theta_woo", "theta_lit", "theta_som", "theta_min",
               "temperature_exponent", "d_onset", "cr_onset", "d_fall", "cr_fall", "c_lf",
               "lma", "ceff", "c_lab_0", "c_fol_0", "c_roo_0", "c_woo_0", "c_lit_0", "c_som_0")
 
@@ -51,7 +51,7 @@ def first_days(drivers: Drivers, n: int) -> Drivers:
 
 def search_prior(drivers, years, latitude, frost, *, seed: int, n_candidates: int,
                  batch_size: int, cold: bool = False, free_a7: bool = False,
-                 fixed: dict[str, Any] | None = None):
+                 fixed: dict[str, Any] | None = None, prior_set: str | None = None):
     """Draw prior parameter sets, run each over the block, and apply the D40 checks.
 
     Returns (params, raw, summary, checks). Callers pick from these: physically
@@ -60,10 +60,11 @@ def search_prior(drivers, years, latitude, frost, *, seed: int, n_candidates: in
     from the cold model's priors and include the two thresholds (D55, D57); with
     `free_a7`, they include the ACM light-use efficiency (D58). With `fixed`
     (a reduced model, D63), those quantities are held at their fixed values, so
-    starts and truth are draws of the reduced model.
+    starts and truth are draws of the reduced model. With `prior_set` (D64), the
+    draws come from that prior set (for example the literature priors).
     """
     rng = np.random.default_rng(seed)
-    params, raw = sample_prior(n_candidates, rng, priors_for(cold), fixed=fixed)
+    params, raw = sample_prior(n_candidates, rng, priors_for(cold, prior_set), fixed=fixed)
     thresholds = None
     if cold:
         raw.update(sample_cold(n_candidates, rng))
