@@ -55,7 +55,7 @@ from dalec.plotting import (
     apply_style, day_of_year_365, heading, save_figure, set_year_axis, smooth_cyclic,
 )
 from dalec.posterior import (
-    check_can_save, computation_checks, interval_figure, parameter_table,
+    check_can_save, computation_checks, interval_figure, parameter_table, target_accept_tag,
     possible_draws, posterior_parameters, print_table_and_health, sampler_health, search_prior,
 )
 from dalec.priors import PRIOR_SETS, fixed_values, prior_median, priors_for, priors_to_text
@@ -238,6 +238,8 @@ def main() -> None:
                         help="override sampler.target_accept (D53); higher = smaller, safer steps")
     parser.add_argument("--fix-set", default=None,
                         help="a reduced model from config fix_sets (D63), e.g. --fix-set MB")
+    parser.add_argument("--draws", type=int, default=None,
+                        help="override sampler.draws (kept draws per chain; D68)")
     parser.add_argument("--prior-set", choices=tuple(PRIOR_SETS), default=None,
                         help="use a named prior set (D64), e.g. --prior-set lit for the literature priors")
     args = parser.parse_args()
@@ -258,7 +260,9 @@ def main() -> None:
         settings["target_accept"] = args.target_accept
     # Output names carry a sampler tag only when the setting was given on the
     # command line; the config defaults (D53) carry none.
-    ta_tag = "" if args.target_accept is None else f"_ta{round(100 * float(settings['target_accept']))}"
+    if args.draws is not None:
+        settings["draws"] = args.draws
+    ta_tag = target_accept_tag(args.target_accept) + (f"_d{args.draws}" if args.draws else "")
     mm_tag = "" if args.mass_matrix is None else f"_{args.mass_matrix}"
     fixed = {name: prior_median(name, priors) for name in filter(None, args.fix.split(","))}
     fix_tag = ("_fix-" + "-".join(sorted(fixed))) if fixed else ""

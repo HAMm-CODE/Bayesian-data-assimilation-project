@@ -48,7 +48,7 @@ from dalec.model_numpy import Parameters, drivers_from_frame, run
 from dalec.plotting import apply_style, heading
 from dalec.priors import COLD_PRIORS, PRIOR_SETS, fixed_values, priors_for, priors_to_text
 from dalec.posterior import (
-    QUANTITIES, check_can_save, computation_checks, first_days, interval_figure,
+    QUANTITIES, check_can_save, computation_checks, target_accept_tag, first_days, interval_figure,
     parameter_table, possible_draws, print_table_and_health, sampler_health, search_prior,
 )
 
@@ -58,9 +58,10 @@ from dalec.posterior import (
 # ---------------------------------------------------------------------------
 
 def choose_truth_and_starts(drivers, years, latitude, frost, n_chains, config, cold=False, fixed=None,
-                            prior_set=None):
-    """Search prior draws: the first fully plausible one is the truth (D48);
-    the next ones that are physically possible are the chain starts (D45)."""
+                            prior_set=None, truth_index: int = 0):
+    """Search prior draws: the first fully plausible one is the truth (D48), or with
+    truth_index 1 the second one (D68); the physically possible draws that are not the
+    truth are the chain starts (D45)."""
     fake = config["fake_data"]
     params, raw, summary, checks = search_prior(
         drivers, years, latitude, frost, seed=int(fake["seed"]),
@@ -71,7 +72,9 @@ def choose_truth_and_starts(drivers, years, latitude, frost, n_chains, config, c
     possible = np.flatnonzero(~checks["tier1_fail"])
     if plausible.size == 0:
         raise RuntimeError("no fully plausible prior draw found; raise fake_data.n_candidates")
-    truth = int(plausible[0])
+    if plausible.size <= truth_index:
+        raise RuntimeError(f"fewer than {truth_index + 1} fully plausible prior draws; raise fake_data.n_candidates")
+    truth = int(plausible[truth_index])
     starts = possible_draws(checks, n_chains, exclude=(truth,))
     print(f"  searched {params.as_arrays()['f_auto'].size} prior draws: "
           f"{possible.size} physically possible, {plausible.size} fully plausible")
@@ -140,6 +143,10 @@ def main() -> None:
                         help="check the cold-limit model (D55, D59)")
     parser.add_argument("--fix-set", default=None,
                         help="a reduced model from config fix_sets (D63), e.g. --fix-set MB")
+    parser.add_argument("--truth", type=int, default=1, choices=(1, 2),
+                        help="which fully plausible prior draw is the true forest: 1 = the first (D48), 2 = the second (D68)")
+    parser.add_argument("--draws", type=int, default=None,
+                        help="override sampler.draws (kept draws per chain; D68)")
     parser.add_argument("--prior-set", choices=tuple(PRIOR_SETS), default=None,
                         help="use a named prior set (D64), e.g. --prior-set lit for the literature priors")
     args = parser.parse_args()
@@ -153,9 +160,11 @@ def main() -> None:
     mass_matrix = args.mass_matrix or settings["mass_matrix"]
     if args.target_accept is not None:
         settings["target_accept"] = args.target_accept
+    if args.draws is not None:
+        settings["draws"] = args.draws
     # Output names carry a sampler tag only when the setting was given on the
     # command line; the config defaults (D53) carry none.
-    ta_tag = "" if args.target_accept is None else f"_ta{round(100 * float(settings['target_accept']))}"
+    ta_tag = target_accept_tag(args.target_accept) + (f"_d{args.draws}" if args.draws else "")
     mm_tag = "" if args.mass_matrix is None else f"_{args.mass_matrix}"
     priors = priors_for(args.cold, args.prior_set)
     prior_tag = f"_{args.prior_set}" if args.prior_set not in (None, "site") else ""
@@ -165,6 +174,7 @@ def main() -> None:
             raise SystemExit(f"--fix-set {args.fix_set}: not in config fix_sets {sorted(config['fix_sets'])}")
         fixed = fixed_values(config["fix_sets"][args.fix_set], priors)
     suffix = (("_cold" if args.cold else "") + prior_tag + (f"_{args.fix_set}" if args.fix_set else "")
+              + ("_truth2" if args.truth == 2 else "")
               + mm_tag + ta_tag + ("_quick" if args.quick else ""))
 
     data = load_model_block(config, block="calibration")
@@ -179,7 +189,7 @@ def main() -> None:
     heading("1. The true forest and the chain starts (D48, D45)")
     params, raw, truth, starts = choose_truth_and_starts(
         drivers, years, latitude, frost, int(settings["chains"]), config, cold=args.cold, fixed=fixed,
-        prior_set=args.prior_set)
+        prior_set=args.prior_set, truth_index=args.truth - 1)
     if prior_tag:
         print(f"  prior set {args.prior_set!r} (D64), in the truth and in the fit")
     if fixed:

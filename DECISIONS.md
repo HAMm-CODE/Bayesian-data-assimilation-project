@@ -689,6 +689,84 @@ Notes on the ladder:
 
 **Code.** `fix_sets` in `config/default.yaml`; option `--fix-set MA` (MB, MC, M0) in scripts 04 and 05; fixing in `src/dalec/priors.py` (`fixed_values`, `apply_fixed`) and `src/dalec/inference.py` (the shares become a fixed value instead of a Dirichlet); checks in `tests/test_fix_sets.py`, including that the log density of M0 equals the hand computation of the full model minus the priors of the fixed quantities.
 
+### D64. Literature priors and the simplest model that represents the forest (Decided 2026-10-27, before any literature value was read; the supervisor's suggestion, OPEN-9)
+**Why.** The supervisor asked for the simplest model that can represent the forest, with posterior values from the literature used as priors, especially for quantities NEE does not inform (such as the starting wood pool). This follows Gelman et al. (2020): simplify (Section 5.2), build up step by step (Section 7), and use outside information in the priors and check how much the priors matter (Sections 6.3 and 7.3). Famiglietti et al. (2021) found that a model of intermediate complexity predicted best at FI-Hyy and five other flux sites.
+
+**Source (OPEN-9 rules 1 and 2).** Bloom et al. (2016), CARDAMOM 2001-2010 (doi:10.7488/ds/316): the same DALEC2 code (`DALEC_400`), fitted to MODIS LAI and soil carbon (HWSD), with no NEE, so its data are separate from ours. The 1 degree grid cell that contains FI-Hyy (61.85 N, 24.29 E): 61 to 62 N, 24 to 25 E. Famiglietti et al. (2021) is not used as a prior, because it fitted FI-Hyy NEE from about 1999 to 2003, which overlaps our data.
+
+**Which quantities.** Only the weakly informed ones (the M0 set: width ratio 0.5 or more in the cold fake-data check, F26) that CARDAMOM reports: `f_auto`, the four growth shares, `theta_woo`, `theta_som`, `lma`, `c_woo_0` and `c_som_0`. CARDAMOM does not report `h` and `cr_onset`; they keep the site priors. All strongly informed quantities keep the site priors (D34 to D39): NEE decides them anyway.
+
+**How a CARDAMOM number becomes a prior (fixed now):**
+1. **Centre:** the cell's median (or exp(log-mean) where only log statistics are given).
+2. **Spread:** the cell's spread on the same scale (log sd for positive quantities, sd for fractions), **doubled**. This counts the CARDAMOM information as a quarter of its weight (a "power prior" with weight 1/4), because it describes a 1 degree cell from satellite LAI and a global soil map, not this stand.
+3. **Rates from residence times:** `theta_woo` = 1 / (365.25 x wood residence time in years). `theta_som` = 1 / (365.25 x soil residence time x F), where F is the mean over 1997-2010 of exp(Theta T_mid) at the prior median Theta = 0.0336. Our `theta_som` is the rate at 0 degC (D20, D35), while CARDAMOM's residence time includes the effect of temperature. If the units turn out not to be years, the units are converted; the rule stays.
+4. **Pools:** `c_woo_0` and `c_som_0` from the 2001-2010 mean pools (an approximation: these slow pools change little between 1997 and 2010).
+5. **Shapes:** log-normal for rates, pools and `lma`; beta for `f_auto` (mean = the cell median, sd doubled); Dirichlet for the four shares (means = each share of GPP divided by the sum of the four; concentration set so that the average sd of the four shares equals the doubled CARDAMOM sd, each divided by 1 - `f_auto`).
+6. The values go into `src/dalec/priors.py` (`PRIOR_SETS["lit"]`) next to the CARDAMOM numbers they came from, and are printed and recorded here before any run. They are not changed after any check or fit.
+7. **Details settled after seeing the file layout, before printing any value at the cell (2026-10-27):** the cell is the one centred at 61.5 N, 24.5 E (its box is 61 to 62 N, 24 to 25 E). The files give mean, median, sd and the 5th, 25th, 75th and 95th percentiles; the residence-time files give a "log-based" mean and sd. For LMA and the pools, which have no log statistics, the log sd comes from the 25th and 75th percentiles (the quartiles: the most robust pair). Whether the residence-time "log-based sd" is the sd of the log or its exponential is judged over all land cells against the quartiles of the same file, not at our cell. Units: pools in t C ha-1, times 100 for g C m-2; residence times in years; LMA in g C m-2. Code: `scripts/07_literature_priors.py`.
+
+**The ladder of literature models ("L"), mirroring D63.** Cold model, dense mass matrix, target_accept 0.99. A fixed quantity is held at the median of its literature prior; the shares at the literature Dirichlet mean; `h` and `cr_onset` (in L0) at their site medians, as in M0.
+
+| Model | Held fixed | Free | Partner in D63 |
+|---|---|---|---|
+| L2 | nothing (literature priors on the 10 quantities above) | 26 | M2 |
+| LA | `c_woo_0` | 25 | MA |
+| LB | + `c_som_0` | 24 | MB |
+| LC | + `theta_som`, `theta_woo` | 22 | MC |
+| L0 | the M0 set | 14 | M0 |
+
+**Steps for each (as D63):** a prior predictive check of the literature priors (script 03, the D40 numbers; **reported, not a gate**, because changing the literature values after the check would be tuning them); a fake-data check with the D63 misses rule; a full fit (D49); the test years (D61).
+
+**How the model is chosen ("the least complexity that represents the forest"), across every eligible model of D63 and D64:**
+1. Eligible: the fake-data check passes and the full fit passes D49.
+2. **Represents the forest:** at least 50% of posterior draws pass the D40 Tier 2 checks over 1997-2010.
+3. Among those, the one with the fewest free quantities; a tie goes to the higher test score.
+4. Its test score is compared with MA by the D61 rule. If it is not clearly worse, it becomes the main model. If it is clearly worse, both are reported: MA as the best predictor of NEE, the chosen one as the simplest believable forest, used for the pools and fluxes of RQ2.
+5. If no model represents the forest, MA stays the main model, and D64 is reported as "literature priors did not give a believable forest", with how far they moved it.
+Every L model is also compared with its D63 partner (site values against literature values).
+
+**Expected before running (written so the result cannot be re-told afterwards):** the weakly informed quantities hardly change NEE, so their new priors should change the fit little. The exceptions may be `lma` and the foliage share, which shape the canopy: values from an LAI-constrained analysis may pull the canopy towards a believable one, at some cost in fit, because NEE prefers the thin canopy (F22).
+
+**Cost:** 10 jobs on Roihu (5 fake-data checks, 5 fits), each up to about a day on 4 cores, plus one short prior check: roughly 3,000 to 6,000 billing units of the 57,000 left.
+
+### D65. What to do with D64 after reading the literature values (Proposed 2026-10-27; to agree with the supervisor; no fit has been run)
+**Why a new decision.** F35 shows that the literature values, built by the D64 rules, are centred far from the stand, carry little information after widening, and include a Dirichlet with all weights below 1, which breaks D33. Running D64 as written is still possible, but not running it is a change of plan, so it is recorded here with its reasons, before any fit.
+
+**Options:**
+- **A. Run D64 as written** (10 jobs, about 1 day). Expected: most prior draws impossible, the fake-data checks may not even find a plausible true forest (0.7% of draws in the dry run), and NUTS may struggle with the Dirichlet. Likely uninterpretable.
+- **B. Run only the prior predictive check of the literature priors on the site weather** (minutes), report F35 and that check, and stop D64 there (recommended). The thesis then states that the only independent DALEC2 posterior for this location describes a 1 degree, deciduous-like, peat-soil ecosystem, so site measurements are the better source of priors for this stand; and it uses F35's agreement (thin canopy, high Rh) in the Discussion.
+- **C. In addition to B, an exploratory test of the supervisor's own example:** hold the starting wood pool (MA) and then the wood and soil pools (MB) at the CARDAMOM medians (10,760 and 23,610 g C m-2), with every other prior at its site value (prior sets `lit_wood`, `lit_wood_soil`). 4 jobs (2 fake-data checks, 2 fits), about a day. It asks whether the value a weakly informed quantity is fixed at matters. Labelled exploratory, because it was chosen after reading the values. Expected: the wood pool changes little; a soil pool 4 times the site value forces the soil turnover or Rh to change.
+**Recommended: B now, C if the supervisor wants a run.**
+
+### D66. The litter-to-soil rate gets its prior directly from the published range; the share `h` is removed (Decided by the author, 2026-10-31; replaces the `h` part of D35)
+**What.** `theta_min` (litter to soil organic matter, d-1, at 0 degC) is sampled directly with a log-normal prior whose 95% range is the published range of Bloom and Williams (2015, Table 1), 1e-5 to 1e-2 d-1: median 3.16e-4 (the geometric middle), sdlog 1.762. This is the D35 fallback rule for a parameter without a site value; the shape is smooth, like every other prior (D33). The share `h` (D35, from RothC) is no longer used anywhere. In the M0 fix set, `theta_min` takes the place of `h`.
+
+**Why.** The author prefers a prior taken from the DALEC2 literature over one built from another model (RothC), which would need its own defence in the thesis. The model equations are unchanged; only this prior changes. The old prior via `h` had a similar centre (median 2.8e-4) but a range about 10 times narrower.
+
+**Consequence: every result that used the old prior is run again,** with the same settings and rules (D49, D61, D63): the prior predictive check of the cold model (D40/D57 numbers), the five fake-data checks (M2, MA, MB, MC, M0) and the five full fits, then the test years (D61) and the D63 choice. F26, F31, F32 and F34 stay in this file as the record of the runs with the `h` prior; the thesis reports the new runs. The fix sets are not re-chosen: MA to MC do not involve this quantity, and M0 keeps its role ("everything not strongly informed").
+
+### D67. The allocation prior written as three beta steps (Decided by the author, 2026-10-31; replaces the form of D28 and D34, not their values)
+**What.** The four shares of GPP that go to the living pools are built step by step, in the order of the official DALEC2 code (D28): foliage takes a fraction `frac_fol` of the growth carbon (GPP - Ra), labile a fraction `frac_lab` of what is left, fine roots a fraction `frac_roo` of what is left after that, and wood the rest. Each fraction has a beta prior: `frac_fol ~ Beta(13.06, 72.59)`, `frac_lab ~ Beta(13.06, 59.53)`, `frac_roo ~ Beta(15.26, 44.27)`. The sampler samples these three fractions; the four shares are computed from them.
+
+**Why.** Easier to explain, and it follows the official code's own split. **It is exactly the same prior as before** (D34): each step is a beta of its own weight against the sum of the weights still to come (checked with 400,000 draws: every share's 2.5%, 50% and 97.5% points and the correlations between shares agree to the third decimal). The sources and the reasoning of D34 are unchanged.
+
+**Consequences.**
+- The sampled quantities are now 23 for DALEC2 and **25 for the cold model, the same count as the model's parameters** (17 process parameters, 6 starting pools, 2 thresholds): `f_auto` and the three fractions stand for the four allocation parameters of Bloom and Williams (2015, Table 1), and `theta_min` is sampled directly (D66). The fake-data checks judge these 25; the misses rule (D63) allows 4, so at least 21 of 25 for the full cold model.
+- The M0 fix set holds the three fractions (instead of "the four shares together"), so M0 still has 14 free quantities.
+- The literature prior set (D64, on hold under D65) is written in the same step form; its values are the exact step equivalent of the earlier ones.
+- Together with D66, every run of the D63 ladder is repeated with the new code (jobs submitted on 2026-10-31 with the D66 code were cancelled before they finished).
+
+### D68. A second true forest, judged together with the first, and a longer, more careful sampler (Decided 2026-11-01, after F36 and before any new run)
+**Why.** In F36 the misses of the fake-data checks come from the true forest itself: it sits in the tails of the priors (LMA 121, below the prior's 5% point 123; roots fraction 0.357, above the prior's 95% point 0.353; `ceff` 6.15 near its lower end), and the misses are near misses towards the prior's centre (`f_auto` missed by 0.0004). A 90% interval covers the truth 90% of the time on average over truths drawn from the prior, so one truth in the tails says little. D48 already allowed "a second truth ... if the first shows problems". Separately, `theta_min` mixes slowly (moderate correlations with `theta_lit` and `c_lit_0`, both -0.46), and MB and MC had one divergence each.
+
+**What (fixed now):**
+1. **Second truth:** the second fully plausible prior draw of the same search (`--truth 2`), not a chosen one.
+2. **Truth criterion judged over both truths pooled:** all free quantities of both runs count together, and the misses allowed follow the D63 rule for the pooled number (M2: at least 42 of 50; MA: 41 of 48; MB: 39 of 46; MC: 35 of 42). Each run must still pass the computation checks on its own. Code: `scripts/08_pool_fake_checks.py`.
+3. **Sampler for every run of this round (both fake-data checks and the fits):** 2,000 kept draws per chain (was 1,000), `target_accept` 0.995 (was 0.99), dense mass matrix, warm-up unchanged (1,000). File names end in `_dense_ta995_d2000`. This changes the computation only, not the model or the rules.
+4. **Models:** M2, MA, MB and MC. M0 is not run again: it failed its fake-data check clearly in both rounds (F32, F36) and is reported as such.
+5. **Then** D61 (test years) and D63 (choice) as written, on the models that pass.
+**If a model still fails,** it is reported as failing; the rules are not changed again in this round.
+
 ## Part 3. Likelihood
 
 ### L1. Observation model: what sigma is (Decided, 2026-10-08; main model changed 2026-10-16)
@@ -998,6 +1076,87 @@ Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily m
 - **Planned response, as written in D49 ("If it fails") and done in D53:** first look where the divergent draws sit, then raise `target_accept` (0.95 to 0.99), which makes the steps smaller. The rule of no divergences is kept as written.
 - **Where the divergences sit (2026-10-23):** spread over all four chains (1, 2, 1 and 3), and the divergent draws have nearly the same values as the others (for example `ceff` 97.8 against 97.7, `cold_t_shutdown` -8.9 against -8.8); only a slight lean towards lower LMA and higher `c_lf` and `f_fol`. No chain and no extreme corner of one parameter stands out, so this is the case of steps slightly too large in a curved region, which a higher `target_accept` addresses; reparameterising (D27) is not indicated. These values were read only to locate the divergences, not as results.
 
+**F32. The D63 ladder: fake-data checks and full fits (Roihu, all dense mass matrix with target_accept 0.99, finished by 2026-10-25). Only the D49 checks were read at this step.**
+
+| Model | Free | Fake-data check | Truth inside 90% | Real fit (D49) | Fit time |
+|---|---|---|---|---|---|
+| M2 | 26 | PASS (F26, target_accept 0.95) | 24 of 26 | PASS: 0 divergences, R-hat 1.0026, ESS 1,949 | 27.3 h (job 2484088) |
+| MA | 25 | PASS (job 2495588, 6.4 h) | 23 of 25 (need 21) | PASS: 0 divergences, R-hat 1.0026, ESS 1,756 | 22.0 h |
+| MB | 24 | PASS (job 2495590, 7.4 h) | 22 of 24 (need 20) | PASS: 0 divergences, R-hat 1.0023, ESS 2,223 | 25.5 h |
+| MC | 22 | PASS (job 2495592, 5.7 h) | 20 of 22 (need 18) | PASS: 0 divergences, R-hat 1.0016, ESS 1,708 | 27.0 h |
+| M0 | 14 | **FAIL** (job 2495594, 3.9 h) | **9 of 14 (need 11)** | PASS: 0 divergences, R-hat 1.0038, ESS 1,084 | 4.9 h |
+
+- **M2 now passes D49** with target_accept 0.99 (the 7 divergences of F31 are gone), as planned in F31. The M2 fit was submitted twice by mistake (jobs 2484088 and 2495596); both gave identical numbers, as expected from the fixed seeds.
+- **MA, MB and MC** miss the same two quantities as F26 (`cr_onset` and `cold_t_full`). This is expected rather than reassuring: the free quantities of the true forest are the same draw each time, so these are not independent repeats.
+- **M0 fails its fake-data check.** The sampler worked (all three computation checks pass), but the truth is outside the 90% interval for 5 of 14 quantities: `theta_roo`, `c_lf`, `ceff`, `c_fol_0`, `c_roo_0`. With 14 quantities at 90%, 5 or more misses happen by chance in about 1% of runs. The misses are canopy and root quantities, which suggests that, with everything else held, the posterior settles on a different canopy and root combination than the truth. Under the D63 rule (step 1), **M0 takes no part in the model choice**, although its real fit passes D49. It is reported with this failure.
+- **M0 failure checked for a code error (2026-10-25): none found.** Every fixed quantity has exactly the same value in the truth and in the fitted model (for example `f_auto` 0.510134 and `f_fol` 0.0746952 in both). The sampler is healthy, and the M0 log density matched the hand computation in `tests/test_fix_sets.py`. The five misses are all near misses beside very narrow intervals (posterior width 8% to 28% of the prior's), and they go in compensating directions: more efficient leaves with less starting foliage (`ceff` 12.4 against a truth of 11.5; `c_fol_0` 453 against 491), and faster root turnover with a smaller starting root pool (`theta_roo` 0.0025 against 0.0016; `c_roo_0` 312 against 371). `c_lf` is missed by less than 0.001. So the posterior sits on a ridge just beside the truth, with intervals too narrow to reach it.
+- **Two facts that help explain it; neither changes the verdict.** (1) M0's true forest is a different prior draw from the one used for MA to MC, because fixing 12 quantities changes which draw is the first plausible one, and it is an unusual draw (`cold_t_shutdown` -0.80 degC, above the top of its prior's 90% range, -2.03). (2) The true forest is drawn from the separate priors without the soft foliage rule (D44), while the fitted model includes that rule. With `f_fol` and `lma` fixed, M0 can only meet the rule by moving `c_fol_0`, `c_lf` and `ceff`, which are three of the five misses. This is a likely mechanism, not a tested one. Running M0 again with a different truth until it passes would be tuning the check to the answer, so it is not done. The D63 verdict stands.
+- **Taking part in the choice (D63 step 2): M2, MA, MB and MC.**
+
+**F33. Second check of the model code: the Edinburgh DALEC2 release (Williams 2019, doi:10.7488/ds/2504, `DALEC2 Feb19.f90`, read 2026-10-25). The model matches it; one small difference in day length, kept as is.**
+- **What it is:** DALEC2 ("DALEC_CDEA") in Fortran 90, deposited by M. Williams in March 2019 as the code of López-Blanco et al. (2019). It is a second official copy, independent of the CARDAMOM C code (`DALEC_400`) used so far (D21 to D31).
+- **Matches line by line:** all ten ACM coefficients and `psi_d`, `R_tot` (D22); conductance with half the temperature range; temperature on `Tmax` in ACM; respiration and decomposition on the midpoint temperature (D20); allocation in steps (foliage, then labile, then roots, wood the rest; same model as our Dirichlet form, D28); leaf fall anchored on the leaf-fall day `F_day`, not on its duration (D25, the typo in printed A8); leaf timing on the day of the run, not the day of year (D30); the offset polynomial in log(L - 1) and the lifespan 1.001 for the labile release (D31); wood litter straight to soil, root and leaf litter to the litter pool; LAI = C_fol / LMA; NEE = Ra + Rh - GPP. **So the model as its authors run it is confirmed by two separate official codes.** Re-read 2026-10-25 against the paper itself: of the "four corrections" carried over from the previous repository, only one changes an equation (A8 prints `cr_fall` where `d_fall` belongs; the paper's own sentence before A9 says the maximum leaf loss occurs at `t mod 365.25 = d_fall`, and both codes anchor on the leaf-fall day). The allocation one is an inconsistency inside Table 1 (the table entry for `f_woo` includes `f_roo`, the footnote below the table leaves it out). The two prose slips are not verified and do not affect the model; they are left out of the thesis. A9 does not matter: the paper says the authors use a sixth-order polynomial look-up for `psi`, which is the polynomial in both codes and in ours. In the thesis these are called differences between the printed equations and the official code, not errors in DALEC2.
+- **One difference: the day-length formula.** This release uses declination `-asin(sin(23.45 deg) cos(2 pi (doy + 10) / 365))` and labels the formula in CARDAMOM `ACM.c` (declination `-23.4 deg cos(...)`, which is ours, D23) as "the old REFLEX project calculation but it is wrong". The two day-length formulas are otherwise the same (12 (1 + 2 asin(x) / pi) equals 24 acos(-x) / pi), so only the declination differs. **Size at FI-Hyy (61.85 N):** at most 4 minutes of day length (mean 2.3 minutes); the ACM day-length factor changes by -0.4% to +0.6% (spring and summer -0.4% to +0.1%; the largest relative changes are in late autumn and winter, when GPP is near zero).
+- **Decision: kept as is; no refit.** The difference is far smaller than the measurement error and the fitted model error, and our formula is the one in the CARDAMOM code that DALEC_400 and the cold-limit code (DALEC_831) run with. Stated in the thesis as a known difference between official versions.
+
+**F34. Test years and the model choice (D61, D63; Roihu job 2526482, 2026-10-25). By the rule fixed in D63, the chosen model is MA (the cold model with the starting wood pool fixed). No model gives a believable forest.**
+
+| Model | Free | Test score (log predictive density, 810 days) | 90% coverage (all / DJF / MAM / JJA / SON) | RMSE | Bias (obs - model) | Tier 2 share | Peak LAI | Rh (g C m-2 yr-1) |
+|---|---|---|---|---|---|---|---|---|
+| M2 | 26 | -886.5 | 0.85 / 1.00 / 0.85 / 0.70 / 0.90 | 0.722 | -0.11 | 0% | 1.06 | 555 |
+| **MA** | 25 | **-885.1** | 0.85 / 1.00 / 0.85 / 0.70 / 0.90 | 0.721 | -0.11 | 0% | 1.05 | 555 |
+| MB | 24 | -887.3 | 0.85 / 1.00 / 0.86 / 0.69 / 0.91 | 0.723 | -0.12 | 0% | 1.05 | 555 |
+| MC | 22 | -890.4 | 0.85 / 1.00 / 0.85 / 0.68 / 0.91 | 0.725 | -0.12 | 0% | 1.05 | 552 |
+| M0 (not eligible, F32) | 14 | -992.1 | 0.83 / 1.00 / 0.89 / 0.61 / 0.89 | 0.794 | -0.21 | 5.8% | 1.45 | 530 |
+
+- **D63 steps 2 to 4:** MA has the best score and is "clearly better" than each other eligible model by the D61 rule: by 1.5 over M2 (twice the widened standard error: 0.9), by 2.2 over MB (1.9) and by 5.3 over MC (4.3). No other model is within the margin, so step 4 (take the smallest of the equally good) has only MA to choose from.
+- **Step 5 (safeguard) does not apply:** no eligible model is believable (Tier 2 share 0% for all four), so there is no believable alternative to prefer. The rule picks **MA**.
+- **Practical size, stated honestly:** the differences are statistically clear but practically tiny. 1.5 log units over 810 days is 0.002 per day; RMSE differs by under 0.5% and coverage by at most 2 points between M2, MA, MB and MC. The standard errors are small because the models are nearly the same and make nearly the same errors on the same days. The widening uses only the lag-1 correlation of consecutive days; if the errors are correlated over longer spans (for example by season), the standard errors are still too small and "clearly better" is less certain than the rule says. Reading: **fixing the starting wood pool costs nothing and may help a little; fixing more starts to cost (MB, MC slightly, M0 a lot: 107 log units worse).** The scores fall steadily as more is fixed: -885.1, -887.3, -890.4, -992.1.
+- **PSIS-LOO on the fitted years (reported only):** all four within 2 of each other (-3,746 to -3,748, standard error about 77; differences 0.2 to 1.4 with standard errors 0.3 to 1.4), so the fitted years cannot tell them apart either. Pareto k fine for every day.
+- **The forest is still not believable in any model:** peak LAI about 1.05 (site 2.5 to 4), Rh about 555 g C m-2 yr-1 (site 290 to 370), Tier 2 share 0%. The cold limit fixed the spring timing but not the thin canopy. This matches F22 and F28: with the ACM light-use efficiency `a7` fixed, a thin canopy is the model's only way to lower its light-use efficiency. This is a main result for RQ1 and RQ3: NEE alone gives a model that predicts NEE reasonably well (coverage 85%) from a forest whose inside is wrong.
+- **Shared weaknesses of all models on the test years:** coverage 100% in winter and only 68% to 70% in summer (one model-error size for the whole year is too wide in winter and too narrow in summer); bias about -0.11 g C m-2 d-1 (the model releases a little more carbon than measured), so the yearly sink is underestimated (2011: about -75 against -127 observed; 2013: about -272 against -313).
+- **Found while reading:** all 810 test days are in 2011 to 2013. 2014 has no day that passes the D12 rule (no sums are printed for 2014), so D61's "2011 to 2014" is in practice 2011 to 2013. To check in the data and state in the thesis.
+- Minor: the evaluation csv and figure file names list only the first three fits (the code shortens names of more than three); the files contain all four.
+
+**F35. The literature values (D64): the only independent DALEC2 posterior for this location describes a different ecosystem from the stand (CARDAMOM 2001-2010, Bloom et al. 2016; cell centred at 61.5 N, 24.5 E; read 2026-10-27 with `scripts/07_literature_priors.py`).**
+
+| Quantity | CARDAMOM cell (median) | Site prior median (D34 to D39) | Site measurement |
+|---|---|---|---|
+| LMA | **22.8 g C m-2** | 185 | about 165 to 210 (D38) |
+| foliage pool (2001-2010 mean) | **28 g C m-2** | 590 (`c_fol_0`) | about 590 (D38) |
+| foliage residence time | **0.40 yr** | needle life 3.8 yr (`c_lf` 0.262) | 3 to 5 yr |
+| mean LAI (foliage / LMA) | 1.2 | about 3.2 | 2.5 to 4 (peak) |
+| share of GPP to foliage | 0.011 | 0.075 | |
+| `f_auto` | 0.50 | 0.51 | |
+| wood pool | 10,760 g C m-2 | 5,900 | 5,900 to 6,300 |
+| soil pool | **23,610 g C m-2** | 6,100 | 6,560 |
+| wood residence time | 30.7 yr | 51 yr | |
+| soil residence time (at the site's temperatures) | 54.1 yr | 32 yr | |
+| GPP | 1,068 g C m-2 yr-1 | | 952 to 1,104 |
+| Rh | 538 g C m-2 yr-1 | | 290 to 370 |
+
+- **Not a quirk of one cell:** across southern and central Finland (60 to 64 N, 22 to 30 E) the CARDAMOM cells have LMA about 23 (median of cells) and a foliage residence time of 0.35 to 0.42 yr, and soil carbon 20,000 to 50,000 g C m-2. CARDAMOM represents this region with a thin canopy that is renewed every year (deciduous-like), fitted to 1 degree MODIS LAI, and with the soil carbon of a global soil map (which includes peat).
+- **What it agrees with, and why this matters (RQ3, Discussion):** with the same fixed ACM coefficients (D22), CARDAMOM reproduces the site's GPP (1,068) with a mean LAI of about 1.2, and its Rh (538) is above the site range, much like our NEE fit (peak LAI about 1.05, Rh about 555, F34). Two independent DALEC2 analyses, one constrained by satellite LAI and soil carbon, the other by tower NEE, both end with a thin canopy and high Rh at this location. This supports the reading of F22 and F28 (a property of DALEC2 with its fixed ACM coefficients at a boreal site) over an artefact of our likelihood. It is support, not proof: a 1 degree cell is not the stand, MODIS LAI includes lakes and other land, and a mean LAI is not a peak LAI.
+- **Why these values do not work as priors for the stand, by the D64 rules as written:**
+  1. **Their centres conflict with the site measurements** by factors of 4 to 21 (LMA 8 times lower, foliage pool 21 times smaller, needle life about 10 times shorter, soil carbon 4 times more).
+  2. **After doubling, the spreads are very wide** (log sd 1.5 to 2.3 for wood and soil turnover, LMA and the wood pool: a factor of 4.5 to 10 per sd), so they carry little information, which is the opposite of what the supervisor's idea needs.
+  3. **The four Dirichlet weights are all below 1** (0.029, 0.006, 0.022, 0.201; sum 0.26). Below 1, the density becomes infinite as a share approaches 0, which breaks the rule that every prior is smooth with no walls (D33) and is hard for NUTS.
+  4. **A dry run of the prior predictive check (made-up weather, 2026-10-27, code check only, not reportable):** 85% of draws physically impossible (LAI above 12 in 85%), 0.7% plausible. Combining CARDAMOM's LMA (23) with the site's foliage prior gives impossible canopies. The real check on the site weather is still to run (D65).
+
+**F36. The D63 ladder with the D66/D67 code (direct `theta_min` prior over the published range, allocation in beta steps; Roihu jobs 2684863 to 2684873, finished 2026-11-01). Only the pass/fail lines were read.**
+- **Prior predictive check of the cold model: PASS** (Tier 1 3.5%, Tier 2 57.7%, with the soft foliage rule).
+
+| Model | Free | Fake-data check: computation | Truth inside 90% | Real fit (D49) |
+|---|---|---|---|---|
+| M2 | 25 | pass (largest R-hat 1.0098, `theta_min`; ESS 482) | **20 of 25, need 21: FAIL** (f_auto, frac_roo, cr_onset, lma, ceff) | pass |
+| MA | 24 | **FAIL** (R-hat 1.0112, `theta_min`; ESS 344) | 20 of 24, need 20 | pass |
+| MB | 23 | pass | **18 of 23, need 19: FAIL** (same five as M2) | **FAIL: 1 divergence** |
+| MC | 21 | pass | 18 of 21, need 17: pass | **FAIL: 1 divergence** |
+| M0 | 14 | pass | **8 of 14, need 11: FAIL** | pass |
+
+- **Under the D63 rule, no model is eligible** (none passes both its fake-data check and its fit).
+- **Compared with F32 (old prior via `h`, Dirichlet form), where M2, MA, MB and MC all passed:** two things changed at once. (1) `theta_min` now has a prior about 10 times wider, and it is the slowest-mixing quantity in four of the ten runs (largest R-hat in the M2, MA and MC fake-data checks and the MB fit), and the smallest effective sample sizes of the fake-data checks for M2 to MC fell from about 1,100 to 2,300 (F26, F32) to 344 to 781. (2) The true forest of the fake-data checks is a different prior draw, because the priors changed and the random draws with them; the new misses are canopy and allocation quantities (`lma`, `ceff`, `f_auto`, `frac_roo`, `cr_onset`), not `theta_min`. The two causes are not yet separated: next step is to look at where the truth sits and how `theta_min` trades off with other quantities, before anything is changed (D49, "if it fails").
+
 ## Part 5. Open items
 
 ### Still open
@@ -1017,6 +1176,19 @@ Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily m
 **OPEN-7. Choice of sampler.** NUTS as the only sampler is carried over from the previous repository. Its settings are now fixed (D49); a dense mass matrix is being tested (D52); other alternatives are not yet re-assessed. Decide after the fake-data run: if it is too slow on the author's machine, the options are running on Roihu, or nutpie (another NUTS implementation that PyMC can call, often faster and with better warm-up, `nuts_sampler="nutpie"`).
 
 **OPEN-8. How to respond to F17 (real NEE pulls the parameters out of the believable region).** Options, all already recorded as planned changes, none tuned to the result: (a) add model error to sigma (L1 option C, Gelman et al. 2020, Sections 7.1 and 10.5), so the likelihood stops treating DALEC2 as able to match each day within RANDUNC; (b) the frost switch (D24), aimed at the spring misfit; (c) both; (d) a Laplace error (L2). Plan: quick fits of (a), (b) and (c) first, each judged with `diagnose_chains.py` (are the chains believable and do they agree?). **Status 2026-10-16 (F18):** (a) removes the separate modes and is now the main error model (L1, changed 2026-10-16); (b) alone does nothing. The remaining implausible canopy leaves three routes (Gelman et al. 2020, Sections 5.2, 6.1, 7): tolerate and report it; simplify (fix the canopy parameters at site values); or expand (a cold limit on photosynthesis, Stettz et al. 2022). To discuss with the supervisor. Gelman et al. (2020, Section 5.9) warn against "haphazardly tweaking the model until computational problems disappear", so every option must have its own reason, and all results are reported, not only the one that works. **Status 2026-10-23:** the main model is not fitted again and the cold-limit model is the base (D62); the simplify route is now the ladder of reduced cold models (D63).
+
+**OPEN-9. Literature posterior values as fixed values or priors (supervisor's suggestion, 2026-10-26).** The idea: take fitted (posterior) DALEC parameter values from similar studies and use them as fixed values or priors, starting from the simplest model. **Literature search, 2026-10-26:**
+
+| Source | Model | Site / data | Numbers published? | Data separate from ours? | Use |
+|---|---|---|---|---|---|
+| Bloom et al. (2016), CARDAMOM 2001-2010 global, doi:10.7488/ds/316 (CC-BY 4.0) | DALEC2 (`DALEC_400`, our code) | 1 degree grid; MODIS LAI, HWSD soil carbon; **no NEE** | yes, per grid cell: median, spread and percentiles of allocation shares (of GPP), residence times of foliage, roots, wood, litter, soil, the six pools, LMA | **yes** | **best candidate for priors** (FI-Hyy grid cell); units to confirm (no README) |
+| Exbrayat and Williams (2018), pan-Arctic CARDAMOM 2000-2015, doi:10.7488/ds/2334; López-Blanco et al. (2019) | DALEC2 (Williams 2019 code) | 1 degree; MODIS LAI, NCSCD soil carbon, biomass; no NEE | allocation, pools, transit times (median and intervals); parameter posteriors only as a figure (Fig. S2) | yes | possible, if the domain covers 61.8 N (not confirmed; the only Finnish tower used is Sodankylä) |
+| Stettz et al. (2022) | DALEC2cold (CARDAMOM) | Niwot Ridge, US; tower GPP 2000-2018 | cold thresholds only: T0 = -7.1 +/- 1.1 degC, Tg = 6.0 +/- 2.6 degC | yes (other site) | prior for the two thresholds (widened for transfer) |
+| Famiglietti et al. (2021) | 16 DALEC variants (C1: 23 parameters, CDEA phenology, ACM1, like DALEC2; S1: 11, E1: 17) | **includes FI-Hyy**; first 5 years (about 1999-2003) of monthly NEE, LAI, biomass | **no** parameter values (only skill metrics, figshare) | **no** (FI-Hyy NEE overlaps ours) | comparison only; could ask the authors; their model-complexity ladder is the closest published analogue to D63 |
+| Fox et al. (2009), REFLEX | original DALEC (5 pools), not DALEC2 | Loobos (NL) and Hesse (FR) | no table of posteriors; priors only (Table 3) | yes | already used for the `ceff` prior range (D42) |
+| Bloom and Williams (2015) | DALEC2 | three temperate AmeriFlux sites; LAI and soil carbon, NEE only to validate | priors in Table 1 | yes | already used |
+
+**Rules for using them (to agree with the supervisor before any run):** (1) the other study's data must be separate from ours, otherwise the same NEE is counted twice (rules out Famiglietti et al. 2021 at FI-Hyy as a prior); (2) same model version and the same meaning of each parameter (for example residence time against rate at 0 degC; share of GPP against share of NPP; LAI convention); (3) a value from another site or a 1 degree cell is widened before use; (4) fixing at a literature value removes its uncertainty and carries over any bias, so an informative prior is preferred to fixing. **Already true:** our priors are based on FI-Hyy measurements (D34 to D39), and D63 fixed quantities at those site-based medians. **Already tested:** fixing canopy quantities at literature values made the fit much worse (F20, F22: `ceff` at the REFLEX median 10 gave LAI 8 to 14 and a log-likelihood about 110 to 170 lower), and M0 (12 quantities fixed) failed its fake-data check (F32) and scored far worse (F34). Status 2026-10-27: discussed; the plan is D64 (literature priors as priors, a ladder from the simplest model).
 
 ### Planned sensitivity runs (decided in principle, to run after the main fit)
 
@@ -1072,6 +1244,7 @@ Not yet re-assessed:
 - Kattge, J. et al. (2011). TRY: a global database of plant traits. Global Change Biology 17, 2905-2935. (Cited in the official code for the lma range.)
 - Kolari, P. (2010). Dissertationes Forestales 99, doi:10.14214/df.99.
 - Kuppel, S. et al. (2012). Constraining a global ecosystem model with multi-site eddy-covariance data. Biogeosciences 9, 3757-3776.
+- López-Blanco, E., Exbrayat, J.-F., Lund, M., Christensen, T. R., Tamstorf, M. P., Slevin, D., Hugelius, G., Bloom, A. A. and Williams, M. (2019). Evaluation of terrestrial pan-Arctic carbon cycling using a data-assimilation system. Earth System Dynamics 10, 233-255. (Uses the DALEC2 code released as Williams 2019.)
 - Mahecha, M. D. et al. (2010). Global convergence in the temperature sensitivity of respiration at ecosystem level. Science 329, 838-840.
 - Makela, A. et al. (2004). Acclimation of photosynthetic capacity in Scots pine to the annual cycle of temperature. Tree Physiology 24, 369-376. (Details to check.)
 - Pastorello, G. et al. (2020). The FLUXNET2015 dataset and the ONEFlux processing pipeline for eddy covariance data. Scientific Data 7, 225.
@@ -1094,6 +1267,7 @@ Not yet re-assessed:
 - Williams, M. et al. (1997). Predicting gross primary productivity in terrestrial ecosystems. Ecological Applications 7(3), 882-894. (Cited for the frost rule, D24; the rule itself not yet found in it.)
 - Williams, M., Schwarz, P. A., Law, B. E., Irvine, J. and Kurpius, M. R. (2005). An improved analysis of forest carbon dynamics using data assimilation. Global Change Biology 11(1), 89-105. doi:10.1111/j.1365-2486.2004.00891.x (the evergreen DALEC; also the model reference of research_plan_v2.md).
 - Williams, M. et al. (2009). Improving land surface models with FLUXNET data. Biogeosciences 6, 1341-1359.
+- Williams, M. (2019). DALEC2 [software]. University of Edinburgh. https://doi.org/10.7488/ds/2504. (File `DALEC2 Feb19.f90`; read 2026-10-25, F33.)
 - Yuan, Q. et al. (2025). Global carbon flux dataset generated by fusing remote sensing and multiple flux networks observation. Scientific Data.
 
 Verify every citation against the original paper before using it in the thesis.

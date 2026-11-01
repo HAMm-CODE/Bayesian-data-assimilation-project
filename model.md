@@ -248,8 +248,12 @@ code (`EDC2_400.c`, EDCs 7 to 12, equilibrium factor 2).
 
 ## 4. Corrections to the published equations
 
-Found by the previous repository by checking the paper against itself. To be
-re-checked against the PDF.
+Found by the previous repository by checking the paper against itself.
+**Re-checked 2026-10-25 (DECISIONS.md F33):** only item 2 changes an equation, and it
+is confirmed by the paper's own text and by two official codes. Item 1 is an
+inconsistency inside Table 1. Items 3 and 4 are unverified prose slips, left out
+of the thesis. In the thesis these are "differences between the printed
+equations and the official code", not errors in DALEC2.
 
 1. **Allocation closure (Table 1, footnote 1).** The footnote gives
    `f_woo = 1 - f_auto - f_fol - f_lab`, leaving out `f_roo`. A1 to A4 and A10

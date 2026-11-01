@@ -99,3 +99,10 @@ def test_allowed_misses_matches_d49_d59_and_gives_3_for_m0():
     got = {k: script.allowed_misses(k, 0.1, tail) for k in (14, 22, 24, 25, 26)}
     assert got == {14: 3, 22: 4, 24: 4, 25: 4, 26: 4}
     assert 24 - got[24] == load_config()["fake_data"]["min_covered"]     # same as D49
+
+
+def test_target_accept_tags():
+    from dalec.posterior import target_accept_tag
+    assert target_accept_tag(None) == ""
+    assert target_accept_tag(0.99) == "_ta99"
+    assert target_accept_tag(0.995) == "_ta995"

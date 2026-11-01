@@ -31,6 +31,14 @@ QUANTITIES = ("f_auto", *FRACTIONS, "theta_roo", "theta_woo", "theta_lit", "thet
 NARROWING = ((0.5, "strongly informed"), (0.9, "partly informed"), (np.inf, "not informed"))
 
 
+def target_accept_tag(value) -> str:
+    """File-name tag for a target_accept given on the command line: 0.99 -> _ta99, 0.995 -> _ta995."""
+    if value is None:
+        return ""
+    hundredths = 100 * float(value)
+    return f"_ta{round(hundredths)}" if abs(hundredths - round(hundredths)) < 1e-9 else f"_ta{round(10 * hundredths)}"
+
+
 # ---------------------------------------------------------------------------
 # Before sampling
 # ---------------------------------------------------------------------------
