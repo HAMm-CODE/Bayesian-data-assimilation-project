@@ -767,6 +767,20 @@ Every L model is also compared with its D63 partner (site values against literat
 5. **Then** D61 (test years) and D63 (choice) as written, on the models that pass.
 **If a model still fails,** it is reported as failing; the rules are not changed again in this round.
 
+### D69. Prior sensitivity of the chosen model by power-scaling (Decided by the author, 2026-11-03, before any result)
+**Why.** RQ1 asks how much NEE constrains each quantity. The width ratio (posterior width / prior width) shows how much the data narrowed a prior, but not whether the prior still steers the answer. Gelman et al. (2020, Section 6.3) recommend checking how sensitive the posterior is to the prior. Refitting with other priors costs about 27 h per fit; power-scaling needs no new sampling.
+
+**What.** For the model chosen under D63 only: the prior and the likelihood are each raised to a power near 1 (ArviZ `psense_summary`, default alphas 0.99 and 1.01), and the saved posterior draws are re-weighted (Kallioinen et al. 2024, check). Per quantity this gives a prior sensitivity and a likelihood sensitivity, read with the ArviZ threshold 0.05:
+- prior high, likelihood low: the prior decides (the data say little);
+- both high: prior-data conflict;
+- both low: the data decide.
+
+**What is scaled.** The prior of every sampled quantity, `sigma_m` included. The soft foliage constraint (D44) is not scaled: it is not a prior on one quantity, so it stays the same in every perturbation. The likelihood is the NEE likelihood (L1) on the 4,413 assimilable days.
+
+**Reported, not a gate.** The result describes the chosen model; it does not change the choice or the priors (changing priors after seeing it would tune them to the data). A strong prior-data conflict is reported and discussed (for example, `theta_min` near the low end of its range, F36).
+
+**Code.** `scripts/11_prior_sensitivity.py <fit>` (rebuilds the model from the fit name, adds the log prior and log likelihood of each saved draw, saves `results/<fit>_psense.nc` and `figures/<fit>_prior_sensitivity.csv`); checks in `tests/test_prior_sensitivity.py`, including that the added terms equal the model's own prior and likelihood at a draw.
+
 ## Part 3. Likelihood
 
 ### L1. Observation model: what sigma is (Decided, 2026-10-08; main model changed 2026-10-16)
@@ -1241,6 +1255,7 @@ Not yet re-assessed:
 - Gelman, A. et al. (2020). Bayesian Workflow. arXiv:2011.01808. (Sections used: 2.1 to 2.5, 4.1, 6.3, 7.1, 7.3, 10.5.)
 - Hollinger, D. Y. and Richardson, A. D. (2005). Uncertainty in eddy covariance measurements and its application to physiological models. Tree Physiology 25.
 - Ilvesniemi, H. et al. (2009). Long-term measurements of the carbon balance of a boreal Scots pine dominated forest ecosystem. Boreal Environment Research 14(4), 731-753. (Site carbon stocks and flows, Fig. 6 and Table 4; used for most priors.)
+- Kallioinen, N., Paananen, T., Bürkner, P.-C. and Vehtari, A. (2024). Detecting and diagnosing prior and likelihood sensitivity with power-scaling. Statistics and Computing 34, 57. (check)
 - Kattge, J. et al. (2011). TRY: a global database of plant traits. Global Change Biology 17, 2905-2935. (Cited in the official code for the lma range.)
 - Kolari, P. (2010). Dissertationes Forestales 99, doi:10.14214/df.99.
 - Kuppel, S. et al. (2012). Constraining a global ecosystem model with multi-site eddy-covariance data. Biogeosciences 9, 3757-3776.
