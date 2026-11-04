@@ -770,7 +770,7 @@ Every L model is also compared with its D63 partner (site values against literat
 ### D69. Prior sensitivity of the chosen model by power-scaling (Decided by the author, 2026-11-03, before any result)
 **Why.** RQ1 asks how much NEE constrains each quantity. The width ratio (posterior width / prior width) shows how much the data narrowed a prior, but not whether the prior still steers the answer. Gelman et al. (2020, Section 6.3) recommend checking how sensitive the posterior is to the prior. Refitting with other priors costs about 27 h per fit; power-scaling needs no new sampling.
 
-**What.** For the model chosen under D63 only: the prior and the likelihood are each raised to a power near 1 (ArviZ `psense_summary`, default alphas 0.99 and 1.01), and the saved posterior draws are re-weighted (Kallioinen et al. 2024, check). Per quantity this gives a prior sensitivity and a likelihood sensitivity, read with the ArviZ threshold 0.05:
+**What.** For the model chosen under D63 only: the prior and the likelihood are each raised to a power near 1 (ArviZ `psense_summary`, default alphas 0.99 and 1.01), and the saved posterior draws are re-weighted (Kallioinen et al. 2024). Per quantity this gives a prior sensitivity and a likelihood sensitivity, read with the ArviZ threshold 0.05:
 - prior high, likelihood low: the prior decides (the data say little);
 - both high: prior-data conflict;
 - both low: the data decide.
@@ -1236,8 +1236,30 @@ Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily m
 | Prior decides, data weak | `frac_roo` (0.083 / 0.022) |
 | Prior and data pull against each other ("potential prior-data conflict") | the other 18, strongest: `c_roo_0` (0.605 / 0.529), `theta_lit` (0.526 / 0.570), `c_lab_0` (0.306 / 0.202), `c_fol_0` (0.278 / 0.411), `c_lf` (0.251 / 0.205), `c_lit_0` (0.243 / 0.150), `d_onset` (0.233 / 0.292), `frac_lab` (0.220 / 0.083) |
 
-- **Two kinds of disagreement with the prior.** `ceff` and `temperature_exponent` sit far outside their priors (F39) yet have low prior sensitivity: the data pin them so firmly that a slightly stronger or weaker prior would not move them. The data have overruled the prior. Quantities such as `c_roo_0`, `theta_lit`, `c_fol_0` and `c_lf` are also outside or at the edge of their priors but with high prior sensitivity: there the prior is still holding them back, and the answer depends on it. (Power-scaling measures how much a small change of the prior moves the posterior, not how far the posterior is from the prior.)
+- **Two kinds of disagreement with the prior.** `ceff` and `temperature_exponent` sit far outside their priors (F39) yet have low prior sensitivity in this joint table. **Corrected by F41 for `ceff`:** scaled on its own, its prior does matter (0.192); the low joint value came from all priors moving together. For `temperature_exponent` F41 confirms that the data decide. Quantities such as `c_roo_0`, `theta_lit`, `c_fol_0` and `c_lf` are also outside or at the edge of their priors but with high prior sensitivity: there the prior is still holding them back, and the answer depends on it. (Power-scaling measures how much a small change of the prior moves the posterior, not how far the posterior is from the prior.)
 - **Caution:** the joint scaling flags 18 of 22 quantities, including some well inside their priors (`d_onset`, `d_fall`, `cr_onset`). Because all priors are scaled at once, a quantity correlated with a conflicting one (for example through the canopy and pool trade-offs) moves with it. The own-prior table (D69 addition) is run to separate these.
+
+**F41. Prior sensitivity of MC, each quantity's own prior scaled on its own (D69 addition; 2026-11-04, from the saved log prior and log likelihood).** Threshold 0.05.
+
+| Reading | Quantities (own prior / likelihood) |
+|---|---|
+| **Data decide; own prior hardly matters** (9) | `temperature_exponent` (0.015 / 0.085), `d_onset` (0.030 / 0.292), `cr_onset` (0.026 / 0.252), `d_fall` (0.015 / 0.144), both cold thresholds (0.004 / 0.072; 0.023 / 0.166), `theta_min` (0.044 / 0.193), `c_lit_0` (0.043 / 0.150), `sigma_m` (0.000 / 0.159) |
+| **Own prior decides, data weak** (1) | `frac_roo` (0.066 / 0.022) |
+| **Own prior and data pull against each other** (12) | strongest: `c_roo_0` (0.533 / 0.529), `c_fol_0` (0.343 / 0.411), `lma` (0.283 / 0.061), `f_auto` (0.265 / 0.156), `c_lf` (0.213 / 0.205), `ceff` (0.192 / 0.093), `theta_lit` (0.125 / 0.570), `c_lab_0` (0.118 / 0.202), `frac_fol` (0.114 / 0.158); near the threshold: `cr_fall` (0.087), `frac_lab` (0.078), `theta_roo` (0.065) |
+
+- **The joint flags on the phenology dates were a side effect** of scaling all priors together (F40): on their own, `d_onset`, `cr_onset` and `d_fall` are decided by the data.
+- **Clear split for RQ1.** NEE decides the timing of the leaf season, the temperature response of respiration, the cold thresholds, the litter-to-soil transfer (`theta_min`, low end of its range), the starting litter pool and the model error. In the canopy and allocation group (`ceff`, `lma`, `c_lf`, `f_auto`, `frac_fol`, starting foliage, labile and root pools, litter decay) the posterior depends on the prior as well as on the data, and the data push most of them outside their priors (F39). These are the quantities of the thin-canopy solution (F22): there the posterior is a compromise between the prior and a model that cannot make GPP follow light with a normal canopy, not a clean estimate of the forest.
+- **Correction to F40:** `ceff` is not "decided by the data"; its own prior matters.
+- Power-scaling is local (a small change of the prior) and uses re-weighted draws; it describes the fitted posterior and changes no prior and no choice (D69).
+
+**F42. RQ1 summary for MC: width ratio, position in the prior and own-prior sensitivity together, and fake against real width ratios (`scripts/12_rq1_summary.py`; fake data: truth 1 only, 2026-11-04).** Table: `figures/rq1_fit_model_error_MC_cold_dense_ta995_d2000.csv`; figure AA.
+
+- **Three groups (own-prior reading, F41):**
+  - *NEE decides* (9): the temperature response (width ratio 0.04), both cold thresholds (0.10, 0.16), the start and length of leaf growth (`d_onset` 0.20, `cr_onset` 0.16), leaf fall (`d_fall` 0.31), `theta_min` (0.56), `c_lit_0` (0.52) and `sigma_m`. Only the temperature exponent and `cold_t_full` sit outside their priors (position 1.40 and -1.15).
+  - *Prior and NEE pull against each other* (11, plus `frac_lab` near the threshold): the canopy and allocation group. Most sit outside their priors: `ceff` (position 3.9), `c_fol_0` (-2.7), `lma` (2.1), `c_roo_0` (2.1), `f_auto` (-1.9), `c_lf` (1.8), `theta_lit` (-1.4), `c_lab_0` (1.1).
+  - *The prior decides* (1): `frac_roo`.
+- **Fake against real (one truth).** 13 of 21 quantities are within 0.1 of the diagonal: on real data NEE taught about as much as the fake-data check said it could. Real data taught clearly less for `c_roo_0` (0.83 against 0.40), `theta_min` (0.56 against 0.20), `c_lit_0` (0.52 against 0.29), `theta_roo` (0.42 against 0.23) and the cold thresholds (0.10 and 0.16 against 0.02): part of this is expected, because the real fits also carry the model error `sigma_m` and the fake ones do not. Real data taught more for `cr_onset` (0.16 against 0.43) and `c_lf` (0.39 against 0.53); for `c_lf`, which sits outside its prior, a narrower posterior than the design allows suggests it is pinned by the model-data mismatch rather than learned.
+- **Caveat:** the fake-data width ratios come from one true forest; with the second truth the comparison uses their mean.
 
 ## Part 5. Open items
 
@@ -1323,7 +1345,7 @@ Not yet re-assessed:
 - Gelman, A. et al. (2020). Bayesian Workflow. arXiv:2011.01808. (Sections used: 2.1 to 2.5, 4.1, 6.3, 7.1, 7.3, 10.5.)
 - Hollinger, D. Y. and Richardson, A. D. (2005). Uncertainty in eddy covariance measurements and its application to physiological models. Tree Physiology 25.
 - Ilvesniemi, H. et al. (2009). Long-term measurements of the carbon balance of a boreal Scots pine dominated forest ecosystem. Boreal Environment Research 14(4), 731-753. (Site carbon stocks and flows, Fig. 6 and Table 4; used for most priors.)
-- Kallioinen, N., Paananen, T., Bürkner, P.-C. and Vehtari, A. (2024). Detecting and diagnosing prior and likelihood sensitivity with power-scaling. Statistics and Computing 34, 57. (check)
+- Kallioinen, N., Paananen, T., Bürkner, P.-C. and Vehtari, A. (2024). Detecting and diagnosing prior and likelihood sensitivity with power-scaling. Statistics and Computing. doi:10.1007/s11222-023-10366-5 (volume and article number: check)
 - Kattge, J. et al. (2011). TRY: a global database of plant traits. Global Change Biology 17, 2905-2935. (Cited in the official code for the lma range.)
 - Kolari, P. (2010). Dissertationes Forestales 99, doi:10.14214/df.99.
 - Kuppel, S. et al. (2012). Constraining a global ecosystem model with multi-site eddy-covariance data. Biogeosciences 9, 3757-3776.

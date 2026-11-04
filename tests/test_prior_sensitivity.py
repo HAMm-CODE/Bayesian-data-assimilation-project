@@ -87,3 +87,15 @@ def test_own_prior_table_has_one_row_per_quantity():
     assert list(own.index) == names
     assert {"own_prior", "likelihood", "reading"} <= set(own.columns)
     assert np.all(np.isfinite(own[["own_prior", "likelihood"]].to_numpy(dtype=float)))
+
+
+def test_position_in_prior_is_0_at_median_and_1_at_the_95_point():
+    import pandas as pd
+    spec = importlib.util.spec_from_file_location(
+        "rq1_script", Path(__file__).resolve().parents[1] / "scripts" / "12_rq1_summary.py")
+    rq1 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rq1)
+    row = pd.Series({"prior_low": 5.0, "prior_median": 10.0, "prior_high": 20.0, "posterior_median": 10.0}, name="ceff")
+    assert rq1.position_in_prior(row) == pytest.approx(0.0)
+    row["posterior_median"] = 20.0
+    assert rq1.position_in_prior(row) == pytest.approx(1.0)      # log scale: (ln 20 - ln 10) / ((ln 20 - ln 5) / 2)
