@@ -101,28 +101,65 @@ def sensitivity(idata, model, thin: int = 1):
     return idata, table
 
 
+def own_prior_table(idata, names) -> "pd.DataFrame":
+    """Each quantity's sensitivity to its OWN prior only (D69 addition): the prior of
+    one quantity is power-scaled while all other priors stay as they are. This
+    separates "this quantity's prior holds it back" from "it moves because some
+    other quantity's prior moved" (the joint table scales all priors at once)."""
+    import pandas as pd
+    rows = {}
+    for name in names:
+        one = az.psense_summary(idata, var_names=[name], prior_var_names=[name])
+        rows[name] = one.loc[name, ["prior", "likelihood"]].astype(float)
+    table = pd.DataFrame(rows).T.rename(columns={"prior": "own_prior"})
+    table["reading"] = [
+        ("own prior and data pull against each other" if p > 0.05 and l > 0.05 else
+         "own prior decides, data weak" if p > 0.05 else
+         "data decide; own prior hardly matters" if l > 0.05 else
+         "neither moves it")
+        for p, l in zip(table["own_prior"], table["likelihood"])]
+    return table
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("fit", help="real-data fit in results/, without .nc")
     parser.add_argument("--thin", type=int, default=1, help="keep every n-th draw (faster; default all)")
+    parser.add_argument("--by-quantity", action="store_true",
+                        help="also scale each quantity's own prior on its own (reuses results/<fit>_psense.nc if it exists)")
     args = parser.parse_args()
     config = load_config()
+    results, figures = resolve_path(config["paths"]["results"]), resolve_path(config["paths"]["figures"])
+    saved = results / f"{args.fit}_psense.nc"
 
     heading(f"Prior sensitivity (D69): {args.fit}")
-    idata = az.from_netcdf(resolve_path(config["paths"]["results"]) / f"{args.fit}.nc")
-    model, opt = rebuild(args.fit, config)
-    print("  model rebuilt from the name: " + ", ".join(f"{k} {v}" for k, v in opt.items()))
-    began = time.perf_counter()
-    idata, table = sensitivity(idata, model, args.thin)
-    print(f"  log prior and log likelihood computed in {(time.perf_counter() - began) / 60:.1f} min")
+    if args.by_quantity and saved.exists():
+        idata = az.from_netcdf(saved)
+        print(f"  reusing {saved.name} (log prior and log likelihood already computed)")
+        free = list(idata.log_prior.data_vars)
+    else:
+        idata = az.from_netcdf(results / f"{args.fit}.nc")
+        model, opt = rebuild(args.fit, config)
+        print("  model rebuilt from the name: " + ", ".join(f"{k} {v}" for k, v in opt.items()))
+        began = time.perf_counter()
+        idata, table = sensitivity(idata, model, args.thin)
+        print(f"  log prior and log likelihood computed in {(time.perf_counter() - began) / 60:.1f} min")
+        idata.to_netcdf(saved)
+        out = figures / f"{args.fit}_prior_sensitivity.csv"
+        table.to_csv(out)
+        print(table.to_string())
+        print(f"\n  saved {out}")
+        print("  all priors scaled together. prior high + likelihood low = the prior decides; both high = "
+              "prior-data conflict; both low = the data decide (threshold 0.05)")
+        free = [rv.name for rv in model.free_RVs]
 
-    idata.to_netcdf(resolve_path(config["paths"]["results"]) / f"{args.fit}_psense.nc")
-    out = resolve_path(config["paths"]["figures"]) / f"{args.fit}_prior_sensitivity.csv"
-    table.to_csv(out)
-    print(table.to_string())
-    print(f"\n  saved {out}")
-    print("  prior high + likelihood low = the prior decides; both high = prior-data conflict; "
-          "both low = the data decide (threshold 0.05)")
+    if args.by_quantity:
+        heading("Each quantity's own prior scaled on its own")
+        own = own_prior_table(idata, free)
+        out = figures / f"{args.fit}_prior_sensitivity_own.csv"
+        own.to_csv(out, float_format="%.3f")
+        print(own.round(3).to_string())
+        print(f"\n  saved {out}")
 
 
 if __name__ == "__main__":

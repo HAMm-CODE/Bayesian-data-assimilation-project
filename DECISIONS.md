@@ -779,6 +779,8 @@ Every L model is also compared with its D63 partner (site values against literat
 
 **Reported, not a gate.** The result describes the chosen model; it does not change the choice or the priors (changing priors after seeing it would tune them to the data). A strong prior-data conflict is reported and discussed (for example, `theta_min` near the low end of its range, F36).
 
+**Addition (2026-11-04, after reading the joint result, F40; stated openly):** the joint table scales all priors at once, so a quantity can show prior sensitivity only because it is correlated with another quantity whose prior moves. A second table scales each quantity's own prior on its own (`--by-quantity`, ArviZ `prior_var_names`), from the saved log prior and log likelihood; no model run. It is a reading aid for the same result, reported next to the joint table, and like it changes no prior and no choice.
+
 **Code.** `scripts/11_prior_sensitivity.py <fit>` (rebuilds the model from the fit name, adds the log prior and log likelihood of each saved draw, saves `results/<fit>_psense.nc` and `figures/<fit>_prior_sensitivity.csv`); checks in `tests/test_prior_sensitivity.py`, including that the added terms equal the model's own prior and likelihood at a draw.
 
 ## Part 3. Likelihood
@@ -1170,6 +1172,72 @@ Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily m
 
 - **Under the D63 rule, no model is eligible** (none passes both its fake-data check and its fit).
 - **Compared with F32 (old prior via `h`, Dirichlet form), where M2, MA, MB and MC all passed:** two things changed at once. (1) `theta_min` now has a prior about 10 times wider, and it is the slowest-mixing quantity in four of the ten runs (largest R-hat in the M2, MA and MC fake-data checks and the MB fit), and the smallest effective sample sizes of the fake-data checks for M2 to MC fell from about 1,100 to 2,300 (F26, F32) to 344 to 781. (2) The true forest of the fake-data checks is a different prior draw, because the priors changed and the random draws with them; the new misses are canopy and allocation quantities (`lma`, `ceff`, `f_auto`, `frac_roo`, `cr_onset`), not `theta_min`. The two causes are not yet separated: next step is to look at where the truth sits and how `theta_min` trades off with other quantities, before anything is changed (D49, "if it fails").
+
+**F37. The D68 round: two true forests, 2,000 draws per chain, target_accept 0.995 (Roihu jobs 2709839 to 2709850, finished 2026-11-03/04). Under D63, MC is the only eligible model; the test-year scores (job 2804864) are still to be read.**
+
+| Model | Free | Fake-data computation (both truths) | Truth inside, truth 1 / truth 2 | Pooled (rule) | Real fit (D49) | Inside 90% band, 1997-2010 |
+|---|---|---|---|---|---|---|
+| M2 | 25 | pass (R-hat at most 1.0069, ESS at least 851) | 20 / 20 of 25 | **40 of 50 (need 42): FAIL** | pass (0 div., R-hat 1.0014, ESS 2,379) | 89.1% |
+| MA | 24 | pass (1.0049, 773) | 19 / 20 of 24 | **39 of 48 (need 41): FAIL** | pass (0, 1.0013, 3,271) | 89.0% |
+| MB | 23 | pass (1.0055, 1,010) | 18 / 18 of 23 | **36 of 46 (need 39): FAIL** | pass (0, 1.0017, 2,845) | 89.3% |
+| MC | 21 | pass (1.0023, 833) | 17 / 18 of 21 | **35 of 42 (need 35): PASS** | pass (0, 1.0031, 2,158) | 89.1% |
+
+- **Computation is now clean everywhere:** no divergences in any of the 12 runs, all R-hat below 1.007, all ESS above 770. The D68 sampler settings solved the F36 computation failures. Every fake-data failure is on the truth criterion only.
+- **The misses come in the same groups in every model**, not at random:
+  - truth 1: `f_auto`, `lma`, `ceff`, `cr_onset` (all four models), plus `frac_roo` (M2, MA, MB);
+  - truth 2: `cr_onset`, `ceff`, `cold_t_full` (all four models), plus `theta_lit` (M2, MA, MB), `c_lit_0` (M2) and `theta_woo` (MB).
+  `ceff` and `cr_onset` are missed for both truths in every model.
+- **Reading (to be checked with the correlations, not used to change any rule):** the groups match trade-offs expected from the equations. `f_auto`, `lma` and `ceff` act together on photosynthesis seen by NEE (leaf area = foliage / LMA; NEE sees (1 - f_auto) x GPP); `cr_onset` and `cold_t_full` both set the start of spring. When quantities trade off, they miss together. The D63 misses rule counts misses as if they were independent (binomial), so for correlated quantities it is stricter than intended: a pass or fail can turn on one shared trade-off. This is reported as a limitation of the check, not used to change the result (D68: the rules are not changed again in this round). A full calibration check would need many true forests (simulation-based calibration), which is out of reach here.
+- **Why MC passes and MB does not:** MC also fixes the soil and wood turnover rates, and with them the `theta_lit` (and in MB `theta_woo`) misses disappear, consistent with a trade-off along the litter-to-soil path. MC passes with no margin (35 of 35 needed).
+- **Real fits:** the four models fit 1997-2010 almost identically (89.0 to 89.3% inside the 90% band). In every model the band is too wide in winter (DJF 99.9%) and too narrow in summer (JJA 75.4 to 75.9%), with spring 89.7 to 89.9% and autumn 92.2 to 92.5%; average misses are small (-0.09 to +0.03 g C m-2 d-1). One model error `sigma_m` for the whole year is too small for summer and too large for winter: a limitation of the error model (L1), reported, not changed.
+- **Consequence under D63:** only MC passes both its fake-data check and its fit, so MC is the only model that takes part in the choice. The test-year scores of all four are still computed and reported (D63 point 6), with MC's believability (D40 Tier 2).
+
+**F38. Test years and the D63 choice for the D68 round (Roihu job 2804864, 2026-11-04). By the D63 rule the chosen model is MC (the cold model with the starting wood and soil pools and the wood and soil turnover rates fixed). The four models predict almost the same; none gives a believable forest.**
+
+| Model | Log predictive density, 810 test days | Behind M2 (D61 rule) | Coverage 90%: all / DJF / MAM / JJA / SON | RMSE | Bias (obs. - model) | Tier 2 share | Peak LAI | GPP | Rh |
+|---|---|---|---|---|---|---|---|---|---|
+| M2 | -885.6 | best | 85.2 / 100 / 85.7 / 69.6 / 90.0% | 0.7217 | -0.111 | 0 | 1.05 | 1,076 | 556 |
+| MA | -886.4 | 0.7 (limit 0.6): clearly behind | 84.8 / 100 / 85.2 / 68.8 / 90.0% | 0.7219 | -0.111 | 0 | 1.05 | 1,079 | 555 |
+| MB | -886.6 | 1.0 (limit 0.8): clearly behind | 84.6 / 100 / 84.6 / 68.4 / 90.0% | 0.7222 | -0.112 | 0 | 1.05 | 1,077 | 555 |
+| MC | -888.6 | 3.0 (limit 2.8): clearly behind | 84.9 / 100 / 85.2 / 68.8 / 90.4% | 0.7234 | -0.115 | 0 | 1.05 | 1,076 | 553 |
+
+(Units: NEE g C m-2 d-1; GPP and Rh g C m-2 yr-1, medians over 1997-2010; site peak LAI 2.5 to 4, site Rh 290 to 370.) Test-year sums, observed / model median (all four models within 1 g C m-2): 2011 -127 / -76; 2012 -212 / -215; 2013 -313 / -272. PSIS-LOO on 1997-2010 (reported only): all four -3,747 to -3,748, differences within 1 standard error.
+
+- **The D63 choice is MC.** Only MC passes both its fake-data check and its fit (F37), so it is the only model that takes part; points 3 to 5 of D63 have nothing to compare. The safeguard (point 5) does not apply: no model is believable (Tier 2 share 0 for all four).
+- **M2 scores "clearly better" than every reduced model under the D61 rule, but by very little.** The largest difference (M2 against MC) is 3.0 log units over 810 days, about 0.004 per day; RMSE differs in the third decimal (0.7217 against 0.7234) and the annual sums agree within 1 g C m-2. The standard errors are small because the models are nearly the same and are compared day by day, so differences too small to matter in practice still pass the 2-standard-error rule. This is reported as a limitation of the rule (statistical, not practical, difference), not used to change the choice. The model that predicts best (M2) is not eligible because it failed its fake-data check.
+- **What fixing cost:** holding the two slow pools and their turnover rates fixed (21 instead of 25 quantities) changed the fit to 1997-2010 and the predictions for 2011-2013 by amounts that are negligible in practice. For NEE at this site, these four quantities are close to irrelevant: the simpler model represents the NEE as well as the full one.
+- **The forest is not believable in any model, and in the same way:** peak LAI about 1.05 (site 2.5 to 4) and Rh about 555 (site 290 to 370) in all four. Since fixing wood and soil changes neither, the cause is not in those quantities; it points to the canopy (foliage and LMA) and to how respiration is split. This is the main item for MC's posterior analysis and for D65.
+- **Test years:** coverage of the 90% band 85% overall, 100% in winter and about 69% in summer, the same pattern as the fitted years (F37) but stronger. The model takes up less carbon than observed on the test days (bias -0.11), mostly in 2011 and 2013.
+
+**F39. The chosen model's posterior (MC, `fit_model_error_MC_cold_dense_ta995_d2000`; summary table from `talk_figures.py`, read 2026-11-04). The same thin, efficient canopy as F21 and F22: 9 of the 21 quantities have their posterior mean outside the prior's 90% range.**
+
+| Quantity | Prior 5% to 95% | Posterior mean (90%) | Where the mean sits in the prior |
+|---|---|---|---|
+| `ceff` | 5.6 to 17.9 | 98 (89 to 108) | far above (quantile 1.0000) |
+| `lma` (g C m-2) | 123 to 279 | 442 (359 to 532) | above (0.9998) |
+| `c_fol_0` (g C m-2) | 360 to 966 | 159 (120 to 202) | far below (0.0000) |
+| `c_roo_0` (g C m-2) | 145 to 390 | 670 (423 to 958) | above (0.9997) |
+| `c_lf` (yr-1) | 0.21 to 0.32 | 0.37 (0.35 to 0.40) | above (0.9989): needles live about 2.7 years |
+| `temperature_exponent` | 0.019 to 0.060 | 0.075 (0.073 to 0.077) | above (0.989): Q10 about 2.1 |
+| `f_auto` | 0.39 to 0.63 | 0.30 (0.25 to 0.35) | below (0.0009) |
+| `theta_lit` (d-1) | 6.2e-4 to 2.4e-3 | 4.8e-4 (3.6e-4 to 6.2e-4) | below (0.012) |
+| `c_lab_0` (g C m-2) | 34 to 175 | 189 (145 to 239) | above (0.964) |
+
+- Inside the prior's 90% range: the three step fractions, `theta_roo`, `theta_min` (low end, quantile 0.08), the four phenology dates and rates, `c_lit_0`, and the two cold thresholds (`cold_t_full` 1.6 degC, low end of its range). `sigma_m` 0.52 g C m-2 d-1.
+- **Reading:** the posterior is the thin canopy of very efficient leaves found in F21 and F22 (peak LAI about 1.05, `ceff` about 100, LMA about 440), with less plant respiration (`f_auto` 0.30) and more decay (Rh about 553, site 290 to 370) and a steep temperature response. F22 showed that NEE strongly prefers this canopy because, with `a7` fixed at the Loobos value, it is the model's only way to make GPP follow sunlight; F28 showed that estimating `a7` moves the canopy towards believable values. Fixing the slow pools (MC) did not change any of this (F38).
+- **Computation:** largest R-hat 1.0031 (`frac_lab`), smallest ESS 2,158; every quantity passes D49.
+- **Next:** the prior sensitivity (D69, job submitted 2026-11-04) is expected to flag these quantities as prior-data conflicts; it is read as stated in D69, not used to change any prior.
+
+**F40. Prior sensitivity of MC, all priors scaled together (D69; Roihu job 2805470, 2026-11-04; log prior and log likelihood computed in 0.9 min).** Threshold 0.05 (ArviZ default).
+
+| Reading | Quantities (prior sensitivity / likelihood sensitivity) |
+|---|---|
+| Data decide, prior hardly matters | `theta_roo` (0.039 / 0.142), `temperature_exponent` (0.031 / 0.085), `ceff` (0.035 / 0.093) |
+| Prior decides, data weak | `frac_roo` (0.083 / 0.022) |
+| Prior and data pull against each other ("potential prior-data conflict") | the other 18, strongest: `c_roo_0` (0.605 / 0.529), `theta_lit` (0.526 / 0.570), `c_lab_0` (0.306 / 0.202), `c_fol_0` (0.278 / 0.411), `c_lf` (0.251 / 0.205), `c_lit_0` (0.243 / 0.150), `d_onset` (0.233 / 0.292), `frac_lab` (0.220 / 0.083) |
+
+- **Two kinds of disagreement with the prior.** `ceff` and `temperature_exponent` sit far outside their priors (F39) yet have low prior sensitivity: the data pin them so firmly that a slightly stronger or weaker prior would not move them. The data have overruled the prior. Quantities such as `c_roo_0`, `theta_lit`, `c_fol_0` and `c_lf` are also outside or at the edge of their priors but with high prior sensitivity: there the prior is still holding them back, and the answer depends on it. (Power-scaling measures how much a small change of the prior moves the posterior, not how far the posterior is from the prior.)
+- **Caution:** the joint scaling flags 18 of 22 quantities, including some well inside their priors (`d_onset`, `d_fall`, `cr_onset`). Because all priors are scaled at once, a quantity correlated with a conflicting one (for example through the canopy and pool trade-offs) moves with it. The own-prior table (D69 addition) is run to separate these.
 
 ## Part 5. Open items
 

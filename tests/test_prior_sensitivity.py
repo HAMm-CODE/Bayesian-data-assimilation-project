@@ -70,3 +70,20 @@ def test_log_prior_and_likelihood_match_the_model():
     got_like = float(np.asarray(idata.log_likelihood["nee"].values).reshape(idata.log_likelihood["nee"].shape[0] * idata.log_likelihood["nee"].shape[1], -1)[0].sum())
     assert got_prior == pytest.approx(float(prior_terms), rel=1e-8)
     assert got_like == pytest.approx(float(like_terms), rel=1e-8)
+
+
+def test_own_prior_table_has_one_row_per_quantity():
+    priors = priors_for(cold=True)
+    fixed = fixed_values(load_config()["fix_sets"]["M0"], priors)
+    observed, sigma, use = fake_observations(median_parameters())
+    model = build_model(DRIVERS, observed, sigma, use, latitude_deg=LAT,
+                        observation_model="randunc_plus_model_error", cold_limit=True, fixed=fixed)
+    names = [rv.name for rv in model.free_RVs]
+    with model:
+        draws = pm.sample_prior_predictive(draws=40, random_seed=4, var_names=names)
+    idata = az.from_dict({"posterior": {n: np.asarray(draws.prior[n].values) for n in names}})
+    idata, _ = script.sensitivity(idata, model)
+    own = script.own_prior_table(idata, names)
+    assert list(own.index) == names
+    assert {"own_prior", "likelihood", "reading"} <= set(own.columns)
+    assert np.all(np.isfinite(own[["own_prior", "likelihood"]].to_numpy(dtype=float)))
