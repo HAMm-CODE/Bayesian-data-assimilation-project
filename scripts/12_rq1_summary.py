@@ -51,7 +51,7 @@ READINGS = {
 
 
 # Label nudges (points) where two labels would overlap
-LABEL_OFFSETS = {"cr_fall": (-36, -3), "c_lab_0": (6, -14), "d_fall": (6, 4)}
+LABEL_OFFSETS = {"cr_fall": (-36, -3), "c_lab_0": (6, -14), "d_fall": (6, 4), "f_auto": (6, -12)}
 
 
 def position_in_prior(row: pd.Series) -> float:

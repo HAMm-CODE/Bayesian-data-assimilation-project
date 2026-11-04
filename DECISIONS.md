@@ -1252,14 +1252,36 @@ Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily m
 - **Correction to F40:** `ceff` is not "decided by the data"; its own prior matters.
 - Power-scaling is local (a small change of the prior) and uses re-weighted draws; it describes the fitted posterior and changes no prior and no choice (D69).
 
-**F42. RQ1 summary for MC: width ratio, position in the prior and own-prior sensitivity together, and fake against real width ratios (`scripts/12_rq1_summary.py`; fake data: truth 1 only, 2026-11-04).** Table: `figures/rq1_fit_model_error_MC_cold_dense_ta995_d2000.csv`; figure AA.
+**F42. RQ1 summary for MC: width ratio, position in the prior and own-prior sensitivity together, and fake against real width ratios (`scripts/12_rq1_summary.py`; fake data: mean of truths 1 and 2, 2026-11-04).** Table: `figures/rq1_fit_model_error_MC_cold_dense_ta995_d2000.csv`; figure AA.
 
 - **Three groups (own-prior reading, F41):**
   - *NEE decides* (9): the temperature response (width ratio 0.04), both cold thresholds (0.10, 0.16), the start and length of leaf growth (`d_onset` 0.20, `cr_onset` 0.16), leaf fall (`d_fall` 0.31), `theta_min` (0.56), `c_lit_0` (0.52) and `sigma_m`. Only the temperature exponent and `cold_t_full` sit outside their priors (position 1.40 and -1.15).
   - *Prior and NEE pull against each other* (11, plus `frac_lab` near the threshold): the canopy and allocation group. Most sit outside their priors: `ceff` (position 3.9), `c_fol_0` (-2.7), `lma` (2.1), `c_roo_0` (2.1), `f_auto` (-1.9), `c_lf` (1.8), `theta_lit` (-1.4), `c_lab_0` (1.1).
   - *The prior decides* (1): `frac_roo`.
-- **Fake against real (one truth).** 13 of 21 quantities are within 0.1 of the diagonal: on real data NEE taught about as much as the fake-data check said it could. Real data taught clearly less for `c_roo_0` (0.83 against 0.40), `theta_min` (0.56 against 0.20), `c_lit_0` (0.52 against 0.29), `theta_roo` (0.42 against 0.23) and the cold thresholds (0.10 and 0.16 against 0.02): part of this is expected, because the real fits also carry the model error `sigma_m` and the fake ones do not. Real data taught more for `cr_onset` (0.16 against 0.43) and `c_lf` (0.39 against 0.53); for `c_lf`, which sits outside its prior, a narrower posterior than the design allows suggests it is pinned by the model-data mismatch rather than learned.
-- **Caveat:** the fake-data width ratios come from one true forest; with the second truth the comparison uses their mean.
+- **Fake against real (mean of the two true forests; Roihu run 2026-11-04).** 12 of 21 quantities are within 0.1 of the diagonal: on real data NEE taught about as much as the fake-data checks said it could. Real data taught clearly less for `theta_min` (0.56 against 0.19), `c_lit_0` (0.52 against 0.23), `c_roo_0` (0.83 against 0.62), `cold_t_full` (0.16 against 0.02), `c_fol_0` (0.53 against 0.40), `theta_lit` (0.40 against 0.28) and `f_auto` (0.50 against 0.40); part of this is expected, because the real fits also carry the model error `sigma_m` and the fake ones do not. Real data taught more for `cr_onset` (0.16 against 0.43) and `c_lf` (0.39 against 0.49), as with one truth; for `c_lf`, which sits outside its prior, a narrower posterior than the design allows suggests it is pinned by the model-data mismatch rather than learned.
+
+**F43. RQ2, where MC's predictive uncertainty comes from (figure X, `talk_figures.py --predict`, 200 posterior draws; 2026-11-04).** Standard deviations by month, g C m-2 d-1:
+- **Model error `sigma_m`: 0.52 in every month**, the largest source all year.
+- **Measurement error (mean RANDUNC on the days used):** about 0.06 in winter, rising to 0.27 in July.
+- **Parameter uncertainty (spread of daily NEE across posterior draws): 0.01 to 0.05**, largest in May, the smallest source in every month.
+- **Reading.** The predictive band is set almost entirely by the model error. Because `sigma_m` is one value for the year, the total band hardly changes with the season (about 0.52 in winter, about 0.59 in July: the square root of the sum of the squares), while the real misfit is much larger in summer: hence the 70 to 76% summer and 100% winter coverage (F37, F38). Parameter uncertainty is small even where the parameters disagree with their priors (F39 to F42): the posterior is confident about a forest that is not believable. More NEE data would narrow the smallest source; a better model structure (or a model error that changes with the season) would address the largest.
+
+**F44. RQ3, which quantities trade off in MC (figure U, the six most correlated pairs on the prior's scale; 2026-11-04).**
+
+| Pair | Correlation | Why, from the model equations |
+|---|---|---|
+| LMA and `c_lab_0` | +0.77 | more starting sugar store means more foliage in the spring flush; a heavier leaf (higher LMA) keeps leaf area, which NEE sees, the same |
+| `theta_lit` and `c_roo_0` | -0.75 | dying roots feed the litter pool; more root carbon at the start needs slower litter decay for the same decay respiration |
+| `frac_lab` (s_lab) and `c_lab_0` | +0.73 | both set how much carbon passes through the labile store to the leaves |
+| LMA and `c_fol_0` | +0.71 | leaf area = foliage carbon / LMA: NEE fixes their ratio, not each |
+| `frac_lab` (s_lab) and LMA | +0.71 | more carbon to the labile store, more foliage, so a heavier leaf for the same leaf area |
+| `f_auto` and `ceff` | +0.65 | NEE sees (1 - `f_auto`) x GPP: more plant respiration needs more photosynthesis (predicted before the results were read, 2026-11-03) |
+
+- **Four of the six pairs are one trade-off:** {LMA, `c_fol_0`, `c_lab_0`, `frac_lab`}. NEE fixes how much leaf area the forest has, but not how much carbon is in the leaves or how heavy each leaf is. This is the "thin canopy" group (F22, F39).
+- **Every quantity in these pairs is in the "prior and data pull against each other" group of F41.** Where NEE fixes only a combination, the prior decides where along it the posterior sits; that is why their priors still matter. RQ1 and RQ3 explain each other.
+- **The fake-data misses group the same way** (F37: `f_auto`, `lma`, `ceff` missed together).
+- Expected pairs not among the six: `theta_som` and `c_som_0` (both fixed in MC, so no correlation exists); `theta_min` and `theta_lit`; `ceff` and LMA; `cr_onset` and `cold_t_full`. Their values are read from the full correlation matrix (all pairs with |r| of 0.5 or more), still to be listed.
+- **What would separate them (for the Discussion):** leaf area or needle-mass measurements (LMA, foliage), root biomass (roots and litter), and a measured split of respiration (autotrophic against heterotrophic, `f_auto`).
 
 ## Part 5. Open items
 
