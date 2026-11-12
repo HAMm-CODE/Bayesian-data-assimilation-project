@@ -39,6 +39,16 @@ def target_accept_tag(value) -> str:
     return f"_ta{round(hundredths)}" if abs(hundredths - round(hundredths)) < 1e-9 else f"_ta{round(10 * hundredths)}"
 
 
+def randunc_scale_tag(scale) -> str:
+    """File-name tag for a RANDUNC multiplier given on the command line (D71):
+    None or 1 -> "", 0.5 -> _ru0p5, 2 -> _ru2."""
+    if scale is None or float(scale) == 1.0:
+        return ""
+    if not float(scale) > 0:
+        raise ValueError("--randunc-scale must be positive")
+    return "_ru" + f"{float(scale):g}".replace(".", "p")
+
+
 # ---------------------------------------------------------------------------
 # Before sampling
 # ---------------------------------------------------------------------------

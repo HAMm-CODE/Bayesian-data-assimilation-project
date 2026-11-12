@@ -48,7 +48,7 @@ from dalec.model_numpy import Parameters, drivers_from_frame, run
 from dalec.plotting import apply_style, heading
 from dalec.priors import COLD_PRIORS, PRIOR_SETS, fixed_values, priors_for, priors_to_text
 from dalec.posterior import (
-    QUANTITIES, check_can_save, computation_checks, target_accept_tag, first_days, interval_figure,
+    QUANTITIES, check_can_save, computation_checks, randunc_scale_tag, target_accept_tag, first_days, interval_figure,
     parameter_table, possible_draws, print_table_and_health, sampler_health, search_prior,
 )
 
@@ -149,6 +149,8 @@ def main() -> None:
                         help="override sampler.draws (kept draws per chain; D68)")
     parser.add_argument("--prior-set", choices=tuple(PRIOR_SETS), default=None,
                         help="use a named prior set (D64), e.g. --prior-set lit for the literature priors")
+    parser.add_argument("--randunc-scale", type=float, default=1.0,
+                        help="multiply RANDUNC by this, in the fake noise and in the likelihood (D71), e.g. 0.5 or 2")
     args = parser.parse_args()
 
     check_can_save()
@@ -175,7 +177,7 @@ def main() -> None:
         fixed = fixed_values(config["fix_sets"][args.fix_set], priors)
     suffix = (("_cold" if args.cold else "") + prior_tag + (f"_{args.fix_set}" if args.fix_set else "")
               + ("_truth2" if args.truth == 2 else "")
-              + mm_tag + ta_tag + ("_quick" if args.quick else ""))
+              + mm_tag + ta_tag + randunc_scale_tag(args.randunc_scale) + ("_quick" if args.quick else ""))
 
     data = load_model_block(config, block="calibration")
     drivers = drivers_from_frame(data, config)
@@ -183,7 +185,9 @@ def main() -> None:
     latitude = float(config["site"]["latitude_deg"])
     frost_cfg = config["model"]["frost_cutoff"]
     frost = float(frost_cfg["threshold_degc"]) if frost_cfg["enabled"] else None
-    sigma = data[config["columns"]["sigma"]].to_numpy(dtype=float)
+    # D71: the measurement error is RANDUNC times a multiplier (1 = as measured); the same
+    # scaled values make the fake noise and enter the likelihood.
+    sigma = float(args.randunc_scale) * data[config["columns"]["sigma"]].to_numpy(dtype=float)
     use = data[MASK_USE].to_numpy(dtype=bool)
 
     heading("1. The true forest and the chain starts (D48, D45)")
@@ -208,6 +212,8 @@ def main() -> None:
         drivers = first_days(drivers, n_days)
     print(f"  {n_days} days, of which {int(use[:n_days].sum())} assimilable "
           f"(likelihood uses only these, D12)")
+    if args.randunc_scale != 1.0:
+        print(f"  RANDUNC multiplied by {args.randunc_scale:g} in the noise and in the likelihood (D71)")
 
     heading("3. Building the model and sampling (D47, D49)")
     if config["likelihood"]["observation_model"] != "randunc_only":

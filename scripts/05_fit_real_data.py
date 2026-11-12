@@ -55,7 +55,7 @@ from dalec.plotting import (
     apply_style, day_of_year_365, heading, save_figure, set_year_axis, smooth_cyclic,
 )
 from dalec.posterior import (
-    check_can_save, computation_checks, interval_figure, parameter_table, target_accept_tag,
+    check_can_save, computation_checks, interval_figure, parameter_table, randunc_scale_tag, target_accept_tag,
     possible_draws, posterior_parameters, print_table_and_health, sampler_health, search_prior,
 )
 from dalec.priors import PRIOR_SETS, fixed_values, prior_median, priors_for, priors_to_text
@@ -242,6 +242,8 @@ def main() -> None:
                         help="override sampler.draws (kept draws per chain; D68)")
     parser.add_argument("--prior-set", choices=tuple(PRIOR_SETS), default=None,
                         help="use a named prior set (D64), e.g. --prior-set lit for the literature priors")
+    parser.add_argument("--randunc-scale", type=float, default=1.0,
+                        help="multiply RANDUNC by this in the likelihood (D71), e.g. 0.5 or 2")
     args = parser.parse_args()
 
     check_can_save()
@@ -273,7 +275,7 @@ def main() -> None:
         fix_tag += f"_{args.fix_set}"
     label = ("fit" + ("_model_error" if observation_model != "randunc_only" else "") + fix_tag
              + ("_frost" if frost_on else "") + ("_cold" if args.cold else "") + prior_tag
-             + ("_a7" if args.free_a7 else "") + mm_tag + ta_tag
+             + ("_a7" if args.free_a7 else "") + mm_tag + ta_tag + randunc_scale_tag(args.randunc_scale)
              + ("_quick" if args.quick else ""))
     interval = float(fit["interval"])
     batch_size = int(config["prior_predictive"]["batch_size"])
@@ -287,11 +289,14 @@ def main() -> None:
     months = data.index.month.to_numpy()
     latitude = float(config["site"]["latitude_deg"])
     observed = data[config["columns"]["nee"]].to_numpy(dtype=float)
-    sigma = data[config["columns"]["sigma"]].to_numpy(dtype=float)
+    # D71: the measurement error is RANDUNC times a multiplier (1 = as measured).
+    sigma = float(args.randunc_scale) * data[config["columns"]["sigma"]].to_numpy(dtype=float)
     use = data[MASK_USE].to_numpy(dtype=bool)
 
     heading(f"1. Fitting the real NEE ({label})")
     print(f"  {drivers.n_days} days, of which {int(use.sum())} assimilable (D12)")
+    if args.randunc_scale != 1.0:
+        print(f"  RANDUNC multiplied by {args.randunc_scale:g} in the likelihood (D71)")
     print(f"  observation model {observation_model}; frost switch {'on' if frost_on else 'off'}; "
           f"mass matrix {mass_matrix}")
     if args.cold:

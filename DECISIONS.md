@@ -783,6 +783,36 @@ Every L model is also compared with its D63 partner (site values against literat
 
 **Code.** `scripts/11_prior_sensitivity.py <fit>` (rebuilds the model from the fit name, adds the log prior and log likelihood of each saved draw, saves `results/<fit>_psense.nc` and `figures/<fit>_prior_sensitivity.csv`); checks in `tests/test_prior_sensitivity.py`, including that the added terms equal the model's own prior and likelihood at a draw.
 
+### D70. Thesis notation follows Bloom and Williams (2015) (Decided by the author, 2026-11-07)
+**What.** The thesis text uses the symbols of Bloom and Williams (2015, Table 1 and Appendix A), which Pinnington et al. (2016, Table A.1) also use: pools `C_lab, C_fol, C_roo, C_woo, C_lit, C_som`; parameters `f_auto, f_fol, f_lab, f_roo, theta_woo, theta_roo, theta_lit, theta_som, theta_min, Theta, c_eff, c_lma, c_lf, d_onset, d_fall, c_ronset, c_rfall`. Code names (`frac_fol`, `ceff`, `lma`, `cr_onset`, `c_lab_0`, ...) stay in the code and appear in the thesis only in one mapping table (Methods 3.7 or the appendix). New names invented for the thesis (for example "s_fol" for the step fractions) are not used: no paper uses them.
+
+**Why.** The author wants the text to read like the DALEC literature; examiners know these symbols.
+
+**Finding while checking (2026-11-07): the step form of D67 is the official code's own form, under the published names.** Both official codes compute the allocation in steps: foliage = `p(3)` x (GPP - Ra); labile = `p(13)` x what is left; fine roots = `p(4)` x what is left after that; wood = the rest (`DALEC2 Feb19.f90`, lines 172 to 178; CARDAMOM `DALEC_831.c`, "leaf / labile / root / wood production"; its parameter file says "0.01-0.5 NPP for photosynthetic pools and 0.01-1 of remaining NPP for root and wood pool"). Bloom and Williams (2015, Table 1) describe `f_fol`, `f_lab` and `f_roo` as "fraction of GPP allocated to" each pool. So the thesis keeps the names `f_fol`, `f_lab`, `f_roo`, says once that, as in the official code, each is a fraction of the carbon still left, and lists the wording difference with the other printed-versus-code differences (Appendix A, D28).
+
+### D71. Noise-scaling experiment for RQ2: RANDUNC multiplied by 0.5 and by 2 (Decided 2026-11-13, before any run; use in the thesis subject to the supervisor's agreement)
+**Why.** RQ2 asks how uncertainty travels from the observation noise to the parameters and the pools. F43 shows where the predictive uncertainty comes from, but not what happens when the observation noise changes. This experiment changes it on purpose.
+
+**What (fixed now).**
+1. **Model:** MC, the chosen model (F38). Sampler exactly as in D68: 4 chains, 1,000 warm-up, 2,000 kept draws, dense mass matrix, `target_accept` 0.995.
+2. **Arm 1, fake data (the clean test):** the MC fake-data check with the first true forest (D48), with RANDUNC multiplied by 0.5 and by 2 both in the fake noise and in the likelihood. The random numbers behind the noise are the same in all three levels (same seed), so only the size of the noise differs. The level 1 run exists (F37).
+3. **Arm 2, real data:** the MC fit of the real NEE with RANDUNC multiplied by 0.5 and by 2 in the likelihood; `sigma_m` stays free, with its prior unchanged. The level 1 run exists (F37).
+4. **Code:** `--randunc-scale` in `scripts/04_fake_data_check.py` and `scripts/05_fit_real_data.py`; file names end in `_ru0p5` and `_ru2`.
+
+**What is measured, per sampled quantity and per pool.**
+- The posterior 90% width on the prior's scale (D32), at each level; for the pools, the width of the 90% band at the end of 2010.
+- **Response to noise:** the slope of log(width) against log(multiplier) over the three levels. 1 means the noise passes straight through; 0 means it does not reach the quantity.
+- **Prediction, written down before the runs (arm 1):** response = 1 - r^2, where r is the width ratio (posterior width / prior width) of the same quantity in the level 1 run. This is exact for a linear model with normal prior and noise; for DALEC2 it is a test, not a certainty. The prediction **holds** for a quantity if the measured response is within 0.2 of the predicted one. The share of quantities for which it holds is reported.
+- **Arm 2 in addition:** the posterior of `sigma_m` at each level, and the weight of a July day relative to a January day, (c^2 R_Jan^2 + sigma_m^2) / (c^2 R_Jul^2 + sigma_m^2). Expectation, from F43: about 0.94, 0.80 and 0.43 for c = 0.5, 1 and 2, if `sigma_m` moves as the total misfit requires. No width rule is tested in arm 2, because `sigma_m` can absorb the change; the result is described.
+
+**Rules.**
+- A run is used only if it passes the computation checks of D49 (no divergences, R-hat below 1.01, effective sample size at least 400). A run that fails is reported as failing and not interpreted.
+- The truth criterion of D48 and D68 is reported for arm 1 but decides nothing here.
+- Everything is reported whatever the outcome. The chosen model (MC) and the main results do not change: this is a sensitivity experiment.
+- **Before any analysis:** the scripts that rebuild the model from a file name (06, 11, `talk_figures.py`) must apply the same multiplier; until then their output for these runs is not valid.
+
+**Honest limits.** Three levels give a rough slope. Half the noise makes the posterior sharper and may bring divergences back. One true forest only in arm 1.
+
 ## Part 3. Likelihood
 
 ### L1. Observation model: what sigma is (Decided, 2026-10-08; main model changed 2026-10-16)
@@ -825,10 +855,11 @@ Not chosen:
 
 Implementation (planned): the observation model will be a config setting (`randunc_only` for the main fit; `randunc_plus_model_error` for the sensitivity run), so switching needs no code change. It is not in `config/default.yaml` yet; it is added together with the PyMC model.
 
-### L2. Error distribution (Decided for now, stated limitation)
+### L2. Error distribution (Decided, 2026-11-07, by the author: Gaussian kept; no Laplace fit)
 
 - Gaussian. Hollinger and Richardson (2005), the origin of RANDUNC, argue flux errors look more like a Laplace distribution. This is reported as a limitation.
 - If a Laplace version is tried later, the prior on sigma must be reconsidered, because sigma means something different in the two distributions (Gelman et al. 2020, Section 7.1).
+- **Addition (2026-11-07): the main reason for a Laplace error is already handled.** Lasslop et al. (2008) show that the heavy tails of flux errors are "largely due to a superposition of almost Gaussian distributions with standard deviations varying by flux magnitude": each day is close to Gaussian, but days with large fluxes have larger errors. Their advice is to give each day its own standard deviation, which the main model does (RANDUNC grows with the flux; L1). This is how Lasslop et al. explain the Laplace shape that Richardson et al. (2006) found. The gap that remains is in the model error: `sigma_m` is one value for the year (F43). **Decision (2026-11-07, by the author): the Gaussian is kept and no Laplace fit is run.** Reasons: the DALEC and CARDAMOM literature uses a Gaussian likelihood (CARDAMOM offers only Gaussian forms), and Lasslop et al. (2008) show that a Gaussian with a standard deviation per day, as here, handles the heavy tails. The text of the thesis should give the Lasslop reason, not only "others do it". **Optional, for reporting only:** a check of the standardised residuals of the MC fit (each day's miss divided by its total sigma, posterior mean, then a Q-Q plot against the normal). If they are clearly heavy-tailed, this is reported as a limitation; the likelihood is not changed. A model error that changes with the season is a separate question, for the supervisor (F43).
 
 ---
 
@@ -1266,7 +1297,7 @@ Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily m
 - **Parameter uncertainty (spread of daily NEE across posterior draws): 0.01 to 0.05**, largest in May, the smallest source in every month.
 - **Reading.** The predictive band is set almost entirely by the model error. Because `sigma_m` is one value for the year, the total band hardly changes with the season (about 0.52 in winter, about 0.59 in July: the square root of the sum of the squares), while the real misfit is much larger in summer: hence the 70 to 76% summer and 100% winter coverage (F37, F38). Parameter uncertainty is small even where the parameters disagree with their priors (F39 to F42): the posterior is confident about a forest that is not believable. More NEE data would narrow the smallest source; a better model structure (or a model error that changes with the season) would address the largest.
 
-**F44. RQ3, which quantities trade off in MC (figure U, the six most correlated pairs on the prior's scale; 2026-11-04).**
+**F44. RQ3, which quantities trade off in MC (figure U and the full correlation matrix, on the prior's scale; 2026-11-04).**
 
 | Pair | Correlation | Why, from the model equations |
 |---|---|---|
@@ -1280,7 +1311,8 @@ Thresholds: no GPP below about -6.6 degC, full GPP above about 1.2 degC (daily m
 - **Four of the six pairs are one trade-off:** {LMA, `c_fol_0`, `c_lab_0`, `frac_lab`}. NEE fixes how much leaf area the forest has, but not how much carbon is in the leaves or how heavy each leaf is. This is the "thin canopy" group (F22, F39).
 - **Every quantity in these pairs is in the "prior and data pull against each other" group of F41.** Where NEE fixes only a combination, the prior decides where along it the posterior sits; that is why their priors still matter. RQ1 and RQ3 explain each other.
 - **The fake-data misses group the same way** (F37: `f_auto`, `lma`, `ceff` missed together).
-- Expected pairs not among the six: `theta_som` and `c_som_0` (both fixed in MC, so no correlation exists); `theta_min` and `theta_lit`; `ceff` and LMA; `cr_onset` and `cold_t_full`. Their values are read from the full correlation matrix (all pairs with |r| of 0.5 or more), still to be listed.
+- **All pairs with |r| of 0.5 or more (11; full matrix read 2026-11-04):** the six above, plus `frac_roo` and LMA (-0.60), `theta_lit` and `c_lit_0` (-0.57; litter decay respiration is about `theta_lit` x litter pool, so NEE fixes their product), `cold_t_shutdown` and `cold_t_full` (-0.57; the two ends of the cold ramp move in opposite directions, so NEE fixes the temperature where photosynthesis is half switched on more than the width of the ramp), `frac_lab` and `frac_roo` (-0.56) and `frac_roo` and `c_lab_0` (-0.55). The three involving `frac_roo` are probably indirect, through its link with `frac_lab`; their mechanism is not clear from the equations alone and is reported as such.
+- **Expected pairs that did NOT appear:** `ceff` and LMA (-0.06; predicted positive on 2026-11-03: wrong; leaf area trades with the canopy's carbon instead, and `ceff` with `f_auto`), `theta_min` and `theta_lit` (+0.07; was -0.46 in the F36 fake-data check, not on real data), `cr_onset` and `cold_t_full` (+0.12), `ceff` and `c_fol_0` (+0.02). `theta_som` and `c_som_0` are both fixed in MC, so they cannot correlate.
 - **What would separate them (for the Discussion):** leaf area or needle-mass measurements (LMA, foliage), root biomass (roots and litter), and a measured split of respiration (autotrophic against heterotrophic, `f_auto`).
 
 ## Part 5. Open items
@@ -1370,16 +1402,17 @@ Not yet re-assessed:
 - Kallioinen, N., Paananen, T., Bürkner, P.-C. and Vehtari, A. (2024). Detecting and diagnosing prior and likelihood sensitivity with power-scaling. Statistics and Computing. doi:10.1007/s11222-023-10366-5 (volume and article number: check)
 - Kattge, J. et al. (2011). TRY: a global database of plant traits. Global Change Biology 17, 2905-2935. (Cited in the official code for the lma range.)
 - Kolari, P. (2010). Dissertationes Forestales 99, doi:10.14214/df.99.
+- Lasslop, G., Reichstein, M., Kattge, J. and Papale, D. (2008). Influences of observation errors in eddy flux data on inverse model parameter estimation. Biogeosciences 5, 1311-1324. (author list and end page to check)
 - Kuppel, S. et al. (2012). Constraining a global ecosystem model with multi-site eddy-covariance data. Biogeosciences 9, 3757-3776.
 - López-Blanco, E., Exbrayat, J.-F., Lund, M., Christensen, T. R., Tamstorf, M. P., Slevin, D., Hugelius, G., Bloom, A. A. and Williams, M. (2019). Evaluation of terrestrial pan-Arctic carbon cycling using a data-assimilation system. Earth System Dynamics 10, 233-255. (Uses the DALEC2 code released as Williams 2019.)
 - Mahecha, M. D. et al. (2010). Global convergence in the temperature sensitivity of respiration at ecosystem level. Science 329, 838-840.
 - Makela, A. et al. (2004). Acclimation of photosynthetic capacity in Scots pine to the annual cycle of temperature. Tree Physiology 24, 369-376. (Details to check.)
 - Pastorello, G. et al. (2020). The FLUXNET2015 dataset and the ONEFlux processing pipeline for eddy covariance data. Scientific Data 7, 225.
 - Pensa, M. and Jalkanen, R. (1999). Needle chronologies on Pinus sylvestris in northern Estonia and southern Finland. Silva Fennica 33(3), 171-177. doi:10.14214/sf.654 (pages to check)
-- Pinnington, E. M. et al. (2016). Investigating the role of prior and observation error correlations in improving a model forecast of forest carbon balance using Four-dimensional Variational data assimilation. Agricultural and Forest Meteorology 228-229, 299-314.
+- Pinnington, E. M., Casella, E., Dance, S. L., Lawless, A. S., Morison, J. I. L., Nichols, N. K., Wilkinson, M. and Quaife, T. L. (2016). Investigating the role of prior and observation error correlations in improving a model forecast of forest carbon balance using Four-dimensional Variational data assimilation. Agricultural and Forest Meteorology 228-229, 299-314.
 - Pu, et al. (2025). MCI GPP. Scientific Data.
 - Peltoniemi, M., Pulkkinen, M., Aurela, M., Pumpanen, J., Kolari, P. and Makela, A. (2015). A semi-empirical model of boreal-forest gross primary production, evapotranspiration, and soil water: calibration and sensitivity analysis. Boreal Environment Research 20, 151-171. (check)
-- Richardson, A. D., Hollinger, D. Y., Burba, G. G. et al. (2006). A multi-site analysis of random error in tower-based measurements of carbon and energy fluxes. Agricultural and Forest Meteorology 136, 1-18. (check)
+- Richardson, A. D., Hollinger, D. Y., Burba, G. G. et al. (2006). A multi-site analysis of random error in tower-based measurements of carbon and energy fluxes. Agricultural and Forest Meteorology 136, 1-18.
 - Richardson, A. D. et al. (2010). Estimating parameters of a forest ecosystem C model with measurements of stocks and fluxes as joint constraints. Oecologia 164, 25-40.
 - Schiestl-Aalto, P. (2017). Modelling intra- and inter-annual growth dynamics of Scots pine in the whole-tree carbon balance framework. Dissertationes Forestales 234.
 - Schiestl-Aalto, P. et al. (2013). Duration of shoot elongation in Scots pine varies within the crown and between years. Annals of Botany. doi:10.1093/aob/mct180 (title and year to check)

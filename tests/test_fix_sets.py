@@ -106,3 +106,14 @@ def test_target_accept_tags():
     assert target_accept_tag(None) == ""
     assert target_accept_tag(0.99) == "_ta99"
     assert target_accept_tag(0.995) == "_ta995"
+
+
+def test_randunc_scale_tags():
+    """D71: file names carry the RANDUNC multiplier, and nothing when it is 1."""
+    from dalec.posterior import randunc_scale_tag
+    assert randunc_scale_tag(None) == ""
+    assert randunc_scale_tag(1.0) == ""
+    assert randunc_scale_tag(0.5) == "_ru0p5"
+    assert randunc_scale_tag(2) == "_ru2"
+    with pytest.raises(ValueError):
+        randunc_scale_tag(0)
