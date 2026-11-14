@@ -126,8 +126,9 @@ def real_figure(table: pd.DataFrame) -> plt.Figure:
 
 
 def run_arm(level1: str, config: dict, figures: Path, results: Path, with_prediction: bool):
-    """Check D49 on all three levels, then build the table from those that pass."""
-    tables, failed = {}, []
+    """Check D49 on all three levels, then build the table from those that pass.
+    Returns the table (or None) and the posterior median of sigma_m at each level (real data only)."""
+    tables, failed, sigma_m = {}, [], {}
     for c in LEVELS:
         label = level_label(level1, c)
         path = table_path(label, figures)
@@ -137,19 +138,22 @@ def run_arm(level1: str, config: dict, figures: Path, results: Path, with_predic
             failed.append(c)
             continue
         table = pd.read_csv(path, index_col=0)
-        health = sampler_health(az.from_netcdf(nc))
+        idata = az.from_netcdf(nc)
+        health = sampler_health(idata)
         checks = computation_checks(table, health, config["diagnostics"])
         ok = all(checks.values())
         print(f"  c = {c:g}: {label}  D49 {'PASS' if ok else 'FAIL'}  (divergences {health['divergences']}, "
               f"max R-hat {table['r_hat'].max():.4f}, min ESS {min(table['ess_bulk'].min(), table['ess_tail'].min()):.0f})")
         if ok:
             tables[c] = table
+            if "sigma_m" in idata.posterior.data_vars:      # not in the parameter table; read from the fit itself
+                sigma_m[c] = float(np.median(np.asarray(idata.posterior["sigma_m"].values)))
         else:
             failed.append(c)
     if len(tables) < len(LEVELS):
         print(f"  not all three levels are usable (failed or missing: {failed}); nothing is interpreted for this arm")
-        return None, tables
-    return noise_scaling_table(tables, with_prediction), tables
+        return None, sigma_m
+    return noise_scaling_table(tables, with_prediction), sigma_m
 
 
 def main() -> None:
@@ -173,10 +177,9 @@ def main() -> None:
             save_figure(fake_figure(table), "fig_AF_noise_scaling_fake", config)
     if args.real:
         print("Arm 2, real data")
-        table, tables = run_arm(args.real, config, figures, results, with_prediction=False)
+        table, sig = run_arm(args.real, config, figures, results, with_prediction=False)
         if table is not None:
             print(table.round(3).to_string())
-            sig = {c: float(tables[c].loc["sigma_m", "posterior_median"]) for c in LEVELS}
             for c in LEVELS:
                 print(f"  c = {c:g}: sigma_m {sig[c]:.3f}   July day weight against January {day_weight(sig[c], c):.2f}")
             table.to_csv(figures / "noise_scaling_real.csv", float_format="%.5g")
