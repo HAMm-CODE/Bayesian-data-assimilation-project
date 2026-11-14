@@ -1,4 +1,10 @@
-"""Trace plots of every sampled quantity on ONE slide (for the seminar).
+"""Trace plots of every sampled quantity, for the seminar. Two outputs.
+
+  1. fig_R1_<fit>_trace_overview: all traces on ONE page (small panels).
+  2. fig_R2_<fit>_trace_density_all.pdf: ONE PDF with every quantity, density per
+     chain next to its trace, 6 quantities per page (the layout of figure R in
+     talk_figures.py, but all pages in a single file and with the notation-sheet labels).
+
 
 Nothing is sampled; the script only reads the saved posterior. Each small panel
 shows the draws of one quantity, in order, one colour per chain. If the sampler
@@ -11,8 +17,9 @@ Labels follow the notation sheet (D70): f_fol, c_lma, c_ronset, C^0_lab, and so 
 Run from the repository root, for example:
     python scripts/15_trace_overview.py fit_model_error_MC_cold_dense_ta995_d2000
 
-Saves (in figures/, pdf and png):
-    fig_R1_<fit>_trace_overview
+Saves in figures/:
+    fig_R1_<fit>_trace_overview        (pdf and png)
+    fig_R2_<fit>_trace_density_all.pdf (all pages in one PDF)
 """
 
 import argparse
@@ -21,8 +28,10 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.ticker import MaxNLocator
 
-from dalec.config import load_config
+from dalec.config import load_config, resolve_path
 from dalec.plotting import apply_style, save_figure
 
 _spec = importlib.util.spec_from_file_location("talk_figures", Path(__file__).resolve().parent / "talk_figures.py")
@@ -83,6 +92,58 @@ def trace_overview_figure(post, names: list[str], columns: int = COLUMNS) -> plt
     return fig
 
 
+def density_trace_pages(post, names: list[str], per_page: int = 6) -> list[plt.Figure]:
+    """Pages of two quantities per row: the density of each chain (narrow panel), then its draws in order."""
+    n_chains = post[names[0]].shape[0]
+    figures = []
+    for start in range(0, len(names), per_page):
+        page = names[start:start + per_page]
+        rows = int(np.ceil(len(page) / 2))
+        fig, axes = plt.subplots(rows, 4, figsize=(talk.FULL_WIDTH, 1.6 * rows + 0.8),
+                                 gridspec_kw={"width_ratios": [1, 1.9, 1, 1.9]}, squeeze=False)
+        for slot in range(len(page), 2 * rows):                  # an odd last page
+            axes[slot // 2, 2 * (slot % 2)].axis("off")
+            axes[slot // 2, 2 * (slot % 2) + 1].axis("off")
+        for slot, name in enumerate(page):
+            dens, trace = axes[slot // 2, 2 * (slot % 2)], axes[slot // 2, 2 * (slot % 2) + 1]
+            values = talk.chains_of(post, name)
+            log_axis = talk.on_log_axis(name)
+            for c in range(n_chains):
+                colour = talk.CHAIN_COLOURS[c % len(talk.CHAIN_COLOURS)]
+                x, y = talk.density(values[c], log_axis)
+                if x is not None:
+                    dens.plot(x, y, color=colour, lw=1.6)
+                trace.plot(values[c], color=colour, lw=0.6, alpha=0.75)
+            if log_axis:
+                dens.set_xscale("log")
+                trace.set_yscale("log")
+            exponent = talk.scale_exponent(values) if log_axis else None
+            talk.few_ticks(dens, "x", 2, log_axis, exponent)
+            talk.few_ticks(trace, "y", 3, log_axis, exponent)
+            dens.set_yticks([])
+            dens.set_title(talk.with_scale(thesis_label(name), exponent), loc="left")
+            trace.set_xlim(0, values.shape[1])
+            trace.xaxis.set_major_locator(MaxNLocator(4, integer=True))
+            if slot + 2 < len(page):                             # draw numbers on the last row only
+                trace.tick_params(labelbottom=False)
+            else:
+                trace.set_xlabel("draw")
+        talk.bottom_legend(fig, n_chains)
+        fig.tight_layout(rect=(0, 0.07, 1, 1))
+        figures.append(fig)
+    return figures
+
+
+def save_one_pdf(figures: list[plt.Figure], path: Path) -> None:
+    """All pages in a single PDF file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with PdfPages(path) as pdf:
+        for fig in figures:
+            pdf.savefig(fig, bbox_inches="tight")
+            plt.close(fig)
+    print(f"  saved {path} ({len(figures)} pages)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("fit", help="real-data fit, without .nc")
@@ -94,6 +155,8 @@ def main() -> None:
     names = talk.parameter_names(post)
     print(f"  {len(names)} quantities: {', '.join(names)}")
     save_figure(trace_overview_figure(post, names), f"fig_R1_{args.fit}_trace_overview", config)
+    out_dir = resolve_path(config["paths"]["figures"])
+    save_one_pdf(density_trace_pages(post, names), out_dir / f"fig_R2_{args.fit}_trace_density_all.pdf")
 
 
 if __name__ == "__main__":
